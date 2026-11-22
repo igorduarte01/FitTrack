@@ -12,7 +12,7 @@ import streamlit as st
 DB_NAME = os.environ.get("FITTRACK_DB", "fittrack.db")
 MIN_SENHA = 8
 ITERACOES = 200_000
-ESCALA = 2        # aumenta tudo (quadros, textos, ícones) em proporção; tente 1.5, 2 ou 2.2
+ESCALA = 1.4      # aumenta tudo (quadros, textos, ícones) em proporção; 1 = tamanho do design, tente 1.2 a 2
 MODO_DEMO = True  # True: mostra o código de recuperação na tela. Em produção, use False e envie por email.
 
 
@@ -146,7 +146,7 @@ LARGURAS = {"login": 620, "esqueceu": 620, "home": 620, "cadastro": 580}
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
-html, body, [class*="st-"], .stApp { font-family:'Space Grotesk',sans-serif; }
+.stApp, .stApp *:not([data-testid="stIconMaterial"]) { font-family:'Space Grotesk',sans-serif; }
 .stApp { background:#0b1220; }
 header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .block-container { max-width:__LARGURA__px; padding-top:1.5rem; padding-bottom:1rem; zoom:__ESCALA__; }
@@ -160,26 +160,34 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .ft-bemvindo { color:#fff; text-align:center; font-size:18px; padding:10px; }
 
 /* cartão escuro */
-.st-key-card { background:#2b3340; border-radius:14px; padding:12px 6px; }
-.st-key-card [data-testid="stVerticalBlock"] { gap:0.4rem; }
+[class*="st-key-card_"] { background:#2b3340; border-radius:14px; padding:12px 6px; }
+[class*="st-key-card_"] [data-testid="stVerticalBlock"] { gap:0.4rem; }
 
 /* campos de texto e senha */
-.st-key-card div[data-baseweb="input"] { background:#5b616c; border-radius:8px; border:none; height:34px; }
-.st-key-card div[data-baseweb="base-input"] { background:transparent; }
-.st-key-card input { color:#fff; font-size:18px; height:34px; padding-top:0; padding-bottom:0; }
-.st-key-card input::placeholder { color:#f3f4f6; opacity:1; }
-.st-key-card div[data-baseweb="input"] button { background:transparent; color:#d1d5db; }
-.st-key-card [data-testid="stTextInput"] { margin-bottom:0; }
+[class*="st-key-card_"] div[data-baseweb="input"] { background:#5b616c; border-radius:8px; border:none; height:34px; }
+[class*="st-key-card_"] div[data-baseweb="base-input"] { background:transparent; }
+[class*="st-key-card_"] input { color:#fff; font-size:18px; height:34px; padding-top:0; padding-bottom:0; }
+[class*="st-key-card_"] input::placeholder { color:#f3f4f6; opacity:1; }
+[class*="st-key-card_"] div[data-baseweb="input"] button { background:transparent; color:#d1d5db; }
+[class*="st-key-card_"] [data-testid="stTextInput"] { margin-bottom:0; }
 
 /* botões */
 .stButton, .stButton button { width:100%; }
 .stButton button[kind="primary"], .stButton button[data-testid="stBaseButton-primary"] {
-    background:#2563eb; color:#fff; font-weight:700; font-size:16px; border:none;
-    border-radius:6px; min-height:34px; height:34px; padding:0; }
+    background:#2563eb; color:#fff; font-weight:700; font-size:18px; border:none;
+    border-radius:6px; min-height:44px; height:44px; padding:0; }
 .stButton button[kind="primary"]:hover { background:#1d4ed8; color:#fff; }
 .stButton button[kind="tertiary"], .stButton button[data-testid="stBaseButton-tertiary"] {
-    background:transparent; color:#e5e7eb; border:none; box-shadow:none; font-size:16px;
-    min-height:34px; justify-content:center; padding:0; }
+    background:transparent;
+    color:#e5e7eb;
+    border:none;
+    box-shadow:none;
+    font-size:16px;
+    min-height:40px;
+    width:100%;
+    justify-content:center;
+    padding:0;
+}
 .stButton button[kind="tertiary"]:hover { color:#fff; background:transparent; }
 .st-key-btn_esq button { justify-content:flex-end !important; }
 </style>
@@ -234,7 +242,7 @@ def campo(placeholder, chave, senha=False):
 # ----------------------------- Telas -----------------------------
 def tela_login():
     cabecalho("Fit Track", "Jornada Fitness")
-    with st.container(key="card"):
+    with st.container(key="card_login"):
         email = campo("✉️  Email", "login_email")
         senha = campo("🔒  Senha", "login_senha", senha=True)
         _, c2, c3 = st.columns(COLUNAS_BOTAO)
@@ -255,7 +263,7 @@ def tela_login():
 
 def tela_cadastro():
     cabecalho("Criar conta")
-    with st.container(key="card"):
+    with st.container(key="card_cadastro"):
         email = campo("✉️  Email", "cad_email")
         senha = campo("🔒  Senha", "cad_senha", senha=True)
         conf = campo("🔒  Confirmar senha", "cad_conf", senha=True)
@@ -281,7 +289,7 @@ def enviar_codigo_por_email(email, codigo):
 
 def tela_esqueceu():
     cabecalho("Recuperar senha")
-    with st.container(key="card"):
+    with st.container(key="card_esqueceu"):
         email = campo("✉️  Email", "rec_email")
         _, c2, _ = st.columns(COLUNAS_BOTAO)
         if c2.button("Enviar código", type="primary", key="btn_enviar"):
@@ -318,7 +326,7 @@ def tela_esqueceu():
 
 def tela_home():
     cabecalho("Fit Track", "Jornada Fitness")
-    with st.container(key="card"):
+    with st.container(key="card_home"):
         email = html.escape(st.session_state.usuario or "")
         st.markdown(f"<div class='ft-bemvindo'>Bem-vindo(a) ao Fit Track!<br>{email}</div>",
                     unsafe_allow_html=True)
@@ -338,4 +346,5 @@ if tela == "home" and not st.session_state.usuario:  # protege a tela interna
 
 st.markdown(CSS.replace("__LARGURA__", str(LARGURAS[tela])).replace("__ESCALA__", str(ESCALA)),
             unsafe_allow_html=True)
-TELAS[tela]()
+with st.empty().container():
+    TELAS[tela]()
