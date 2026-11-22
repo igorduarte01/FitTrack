@@ -6,13 +6,15 @@ import secrets
 import sqlite3
 from datetime import datetime, timedelta
 
+from urllib.parse import quote
+
 import streamlit as st
 
 # ----------------------------- Configurações -----------------------------
 DB_NAME = os.environ.get("FITTRACK_DB", "fittrack.db")
 MIN_SENHA = 8
 ITERACOES = 200_000
-ESCALA = 1.4      # aumenta tudo (quadros, textos, ícones) em proporção; 1 = tamanho do design, tente 1.2 a 2
+ESCALA = 1        # 1 = tamanho exato do design; se quiser maior, tente 1.2
 MODO_DEMO = True  # True: mostra o código de recuperação na tela. Em produção, use False e envie por email.
 
 
@@ -143,39 +145,68 @@ criar_tabelas()
 
 LARGURAS = {"login": 620, "esqueceu": 620, "home": 620, "cadastro": 580}
 
+SVG_EMAIL = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#d1d5db' "
+             "stroke-width='1.8' stroke-linejoin='round'><rect x='2' y='5' width='20' height='14' rx='2'/>"
+             "<path d='M2.5 7l9.5 7 9.5-7'/></svg>")
+SVG_LOCK = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7.5 11V7.5a4.5 4.5 0 019 0V11' "
+            "fill='none' stroke='#d1d5db' stroke-width='2'/><rect x='4.5' y='10.5' width='15' height='11' "
+            "rx='2.5' fill='#d1d5db'/></svg>")
+
+
+def css_icones():
+    """Ícones de email e cadeado dentro dos campos (como no design)."""
+    grupos = ((SVG_EMAIL, ["login_email", "cad_email", "rec_email"]),
+              (SVG_LOCK, ["login_senha", "cad_senha", "cad_conf", "rec_nova", "rec_conf"]))
+    regras = []
+    for svg, chaves in grupos:
+        url = 'url("data:image/svg+xml,' + quote(svg) + '")'
+        for k in chaves:
+            regras.append(f'.st-key-{k} [data-testid="stTextInputRootElement"] {{ background-image:{url} !important; '
+                          f'background-repeat:no-repeat; background-position:10px center; background-size:22px 22px; }}')
+            regras.append(f'.st-key-{k} input {{ padding-left:44px !important; }}')
+    return "\n".join(regras)
+
+
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
 .stApp, .stApp *:not([data-testid="stIconMaterial"]) { font-family:'Space Grotesk',sans-serif; }
 .stApp { background:#0b1220; }
 header[data-testid="stHeader"], #MainMenu, footer { display:none; }
-.block-container { max-width:__LARGURA__px; padding-top:1.5rem; padding-bottom:1rem; zoom:__ESCALA__; }
+.block-container { max-width:__LARGURA__px; padding:12px 0 0 0; zoom:__ESCALA__; }
+.block-container [data-testid="stVerticalBlock"] { gap:0; }
+.block-container [data-testid="stHorizontalBlock"] { gap:8px; }
 
 /* textos */
 .ft-avatar { display:flex; justify-content:center; }
-.ft-titulo { color:#fff; font-weight:700; font-size:28px; text-align:center; margin:6px 0 0 0; }
-.ft-sub { color:#e5e7eb; font-size:19px; text-align:center; margin:2px 0 14px 0; }
-.ft-msg { text-align:center; font-size:14px; min-height:18px; }
+.ft-titulo { color:#fff; font-weight:700; font-size:28px; text-align:center; margin:6px 0 0 0; line-height:1.2; }
+.ft-sub { color:#e5e7eb; font-size:19px; text-align:center; margin:2px 0 14px 0; line-height:1.2; }
+.ft-msg { text-align:center; font-size:14px; padding:2px 0; }
 .ft-erro { color:#fca5a5; } .ft-ok { color:#86efac; }
 .ft-bemvindo { color:#fff; text-align:center; font-size:18px; padding:10px; }
+[data-testid="stMarkdownContainer"] p { margin:0; }
 
 /* cartão escuro */
-[class*="st-key-card_"] { background:#2b3340; border-radius:14px; padding:12px 6px; }
-[class*="st-key-card_"] [data-testid="stVerticalBlock"] { gap:0.4rem; }
+.block-container [class*="st-key-card_"] { background:#2b3340; border-radius:14px; padding:12px 6px; gap:6px !important; }
+.block-container [class*="st-key-card_"] [data-testid="stVerticalBlock"] { gap:6px; }
 
 /* campos de texto e senha */
-[class*="st-key-card_"] div[data-baseweb="input"] { background:#5b616c; border-radius:8px; border:none; height:34px; }
-[class*="st-key-card_"] div[data-baseweb="base-input"] { background:transparent; }
-[class*="st-key-card_"] input { color:#fff; font-size:18px; height:34px; padding-top:0; padding-bottom:0; }
+[class*="st-key-card_"] [data-testid="stTextInputRootElement"] {
+    background-color:#5b616c !important; border:none !important; border-radius:8px !important;
+    height:34px !important; min-height:34px !important; box-shadow:none !important; }
+[class*="st-key-card_"] div[data-baseweb="input"],
+[class*="st-key-card_"] div[data-baseweb="base-input"] { background:transparent !important; border:none !important; }
+[class*="st-key-card_"] input { background:transparent !important; color:#fff !important; font-size:17px;
+    height:34px; padding-top:0; padding-bottom:0; padding-left:12px; }
 [class*="st-key-card_"] input::placeholder { color:#f3f4f6; opacity:1; }
-[class*="st-key-card_"] div[data-baseweb="input"] button { background:transparent; color:#d1d5db; }
-[class*="st-key-card_"] [data-testid="stTextInput"] { margin-bottom:0; }
+[class*="st-key-card_"] [data-testid="stTextInputRootElement"] button { background:transparent !important; color:#d1d5db !important; }
 
-/* botões */
-.stButton, .stButton button { width:100%; }
+/* botões: ocupam toda a largura da coluna */
+[class*="st-key-btn_"], [class*="st-key-btn_"] .stButton { width:100% !important; }
+[class*="st-key-btn_"] button { width:100% !important; }
 .stButton button[kind="primary"], .stButton button[data-testid="stBaseButton-primary"] {
-    background:#2563eb; color:#fff; font-weight:700; font-size:18px; border:none;
-    border-radius:6px; min-height:44px; height:44px; padding:0; }
+    background:#2563eb; color:#fff; font-weight:700; font-size:17px; border:none;
+    border-radius:6px; min-height:34px; height:34px; padding:0; }
 .stButton button[kind="primary"]:hover { background:#1d4ed8; color:#fff; }
 .stButton button[kind="tertiary"], .stButton button[data-testid="stBaseButton-tertiary"] {
     background:transparent;
@@ -183,13 +214,15 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
     border:none;
     box-shadow:none;
     font-size:16px;
-    min-height:40px;
+    min-height:34px;
     width:100%;
     justify-content:center;
     padding:0;
 }
 .stButton button[kind="tertiary"]:hover { color:#fff; background:transparent; }
 .st-key-btn_esq button { justify-content:flex-end !important; }
+
+__ICONES__
 </style>
 """
 
@@ -202,7 +235,7 @@ AVATAR = """
 </svg></div>
 """
 
-COLUNAS_BOTAO = [0.31, 0.38, 0.31]  # botão azul centralizado, como no design
+COLUNAS_BOTAO = [0.3, 0.4, 0.3]  # botão azul centralizado, como no design
 
 st.session_state.setdefault("tela", "login")
 st.session_state.setdefault("msg", None)
@@ -243,8 +276,8 @@ def campo(placeholder, chave, senha=False):
 def tela_login():
     cabecalho("Fit Track", "Jornada Fitness")
     with st.container(key="card_login"):
-        email = campo("✉️  Email", "login_email")
-        senha = campo("🔒  Senha", "login_senha", senha=True)
+        email = campo("Email", "login_email")
+        senha = campo("Senha", "login_senha", senha=True)
         _, c2, c3 = st.columns(COLUNAS_BOTAO)
         entrar = c2.button("Login", type="primary", key="btn_login")
         c3.button("Esqueceu a senha?", type="tertiary", key="btn_esq",
@@ -264,9 +297,9 @@ def tela_login():
 def tela_cadastro():
     cabecalho("Criar conta")
     with st.container(key="card_cadastro"):
-        email = campo("✉️  Email", "cad_email")
-        senha = campo("🔒  Senha", "cad_senha", senha=True)
-        conf = campo("🔒  Confirmar senha", "cad_conf", senha=True)
+        email = campo("Email", "cad_email")
+        senha = campo("Senha", "cad_senha", senha=True)
+        conf = campo("Confirmar senha", "cad_conf", senha=True)
         _, c2, _ = st.columns(COLUNAS_BOTAO)
         continuar = c2.button("Continuar", type="primary", key="btn_continuar")
         if continuar:
@@ -290,7 +323,7 @@ def enviar_codigo_por_email(email, codigo):
 def tela_esqueceu():
     cabecalho("Recuperar senha")
     with st.container(key="card_esqueceu"):
-        email = campo("✉️  Email", "rec_email")
+        email = campo("Email", "rec_email")
         _, c2, _ = st.columns(COLUNAS_BOTAO)
         if c2.button("Enviar código", type="primary", key="btn_enviar"):
             codigo = solicitar_reset(email)
@@ -306,9 +339,9 @@ def tela_esqueceu():
         mostrar_msg()
 
         if st.session_state.get("codigo_enviado"):
-            cod = campo("#  Código de 6 dígitos", "rec_cod")
-            nova = campo("🔒  Nova senha", "rec_nova", senha=True)
-            conf = campo("🔒  Confirmar nova senha", "rec_conf", senha=True)
+            cod = campo("Código de 6 dígitos", "rec_cod")
+            nova = campo("Nova senha", "rec_nova", senha=True)
+            conf = campo("Confirmar nova senha", "rec_conf", senha=True)
             _, c2, _ = st.columns(COLUNAS_BOTAO)
             if c2.button("Redefinir senha", type="primary", key="btn_redef"):
                 ok, res = redefinir_senha(email, cod, nova, conf)
@@ -344,7 +377,7 @@ tela = st.session_state.tela
 if tela == "home" and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
 
-st.markdown(CSS.replace("__LARGURA__", str(LARGURAS[tela])).replace("__ESCALA__", str(ESCALA)),
+st.markdown(CSS.replace("__LARGURA__", str(LARGURAS[tela])).replace("__ESCALA__", str(ESCALA)).replace("__ICONES__", css_icones()),
             unsafe_allow_html=True)
 with st.empty().container():
     TELAS[tela]()
