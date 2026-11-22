@@ -173,22 +173,24 @@ CSS = """
 .stApp, .stApp *:not([data-testid="stIconMaterial"]) { font-family:'Space Grotesk',sans-serif; }
 .stApp { background:#0b1220; }
 header[data-testid="stHeader"], #MainMenu, footer { display:none; }
-.block-container { max-width:__LARGURA__px; padding:12px 0 0 0; zoom:__ESCALA__; }
+.block-container { max-width:__LARGURA__px; padding:8px 0 0 0; zoom:__ESCALA__; }
 .block-container [data-testid="stVerticalBlock"] { gap:0; }
 .block-container [data-testid="stHorizontalBlock"] { gap:8px; }
 
 /* textos */
-.ft-avatar { display:flex; justify-content:center; }
-.ft-titulo { color:#fff; font-weight:700; font-size:28px; text-align:center; margin:6px 0 0 0; line-height:1.2; }
-.ft-sub { color:#e5e7eb; font-size:19px; text-align:center; margin:2px 0 14px 0; line-height:1.2; }
+.ft-avatar { display:flex; justify-content:center; height:112px; }
+.ft-avatar svg { display:block; }
+.ft-titulo { color:#fff; font-weight:700; font-size:27px; text-align:center; margin:0; line-height:34px; }
+.ft-sub { color:#e5e7eb; font-size:19px; text-align:center; margin:0 0 24px 0; line-height:26px; }
 .ft-msg { text-align:center; font-size:14px; padding:2px 0; }
 .ft-erro { color:#fca5a5; } .ft-ok { color:#86efac; }
 .ft-bemvindo { color:#fff; text-align:center; font-size:18px; padding:10px; }
+[data-testid="stMarkdown"], [data-testid="stMarkdownContainer"], .stMarkdown { margin:0 !important; padding:0; }
 [data-testid="stMarkdownContainer"] p { margin:0; }
 
 /* cartão escuro */
-.block-container [class*="st-key-card_"] { background:#2b3340; border-radius:14px; padding:12px 6px; gap:6px !important; }
-.block-container [class*="st-key-card_"] [data-testid="stVerticalBlock"] { gap:6px; }
+.block-container [class*="st-key-card_"] { background:#2b3340; border-radius:14px; padding:12px 6px; gap:10px !important; }
+.block-container [class*="st-key-card_"] [data-testid="stVerticalBlock"] { gap:10px; }
 
 /* campos de texto e senha */
 [class*="st-key-card_"] [data-testid="stTextInputRootElement"] {
@@ -220,6 +222,10 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
     padding:0;
 }
 .stButton button[kind="tertiary"]:hover { color:#fff; background:transparent; }
+.stButton button[kind="primary"] p, .stButton button[data-testid="stBaseButton-primary"] p {
+    color:#fff !important; font-weight:700 !important; font-size:17px !important; line-height:1; }
+.stButton button[kind="tertiary"] p, .stButton button[data-testid="stBaseButton-tertiary"] p {
+    color:#e5e7eb !important; font-weight:400 !important; font-size:16px !important; line-height:1; }
 .st-key-btn_esq button { justify-content:flex-end !important; }
 
 __ICONES__
@@ -376,8 +382,3 @@ TELAS = {"login": tela_login, "cadastro": tela_cadastro,
 tela = st.session_state.tela
 if tela == "home" and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
-
-st.markdown(CSS.replace("__LARGURA__", str(LARGURAS[tela])).replace("__ESCALA__", str(ESCALA)).replace("__ICONES__", css_icones()),
-            unsafe_allow_html=True)
-with st.empty().container():
-    TELAS[tela]()
