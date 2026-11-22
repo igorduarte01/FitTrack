@@ -14,7 +14,8 @@ import streamlit as st
 DB_NAME = os.environ.get("FITTRACK_DB", "fittrack.db")
 MIN_SENHA = 8
 ITERACOES = 200_000
-ESCALA = 1        # 1 = tamanho exato do design; se quiser maior, tente 1.2
+ESCALA = 1        # tamanho geral da página (1 = design)
+CARD_ESCALA = 1.4  # tamanho só do quadro de baixo (campos, botões, textos); 1 = design, tente 1.2 a 1.8
 MODO_DEMO = True  # True: mostra o código de recuperação na tela. Em produção, use False e envie por email.
 
 
@@ -189,7 +190,7 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 [data-testid="stMarkdownContainer"] p { margin:0; }
 
 /* cartão escuro */
-.block-container [class*="st-key-card_"] { background:#2b3340; border-radius:14px; padding:12px 6px; gap:10px !important; }
+.block-container [class*="st-key-card_"] { zoom:__CARD_ESCALA__; background:#2b3340; border-radius:14px; padding:12px 6px; gap:10px !important; }
 .block-container [class*="st-key-card_"] [data-testid="stVerticalBlock"] { gap:10px; }
 
 /* campos de texto e senha */
@@ -383,7 +384,8 @@ tela = st.session_state.tela
 if tela == "home" and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
 
-st.markdown(CSS.replace("__LARGURA__", str(LARGURAS[tela])).replace("__ESCALA__", str(ESCALA)).replace("__ICONES__", css_icones()),
+st.markdown(CSS.replace("__LARGURA__", str(round(LARGURAS[tela] * CARD_ESCALA)))
+            .replace("__CARD_ESCALA__", str(CARD_ESCALA)).replace("__ESCALA__", str(ESCALA)).replace("__ICONES__", css_icones()),
             unsafe_allow_html=True)
 with st.empty().container():
     TELAS[tela]()
