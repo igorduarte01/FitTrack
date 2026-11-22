@@ -382,3 +382,8 @@ TELAS = {"login": tela_login, "cadastro": tela_cadastro,
 tela = st.session_state.tela
 if tela == "home" and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
+
+st.markdown(CSS.replace("__LARGURA__", str(LARGURAS[tela])).replace("__ESCALA__", str(ESCALA)).replace("__ICONES__", css_icones()),
+            unsafe_allow_html=True)
+with st.empty().container():
+    TELAS[tela]()
