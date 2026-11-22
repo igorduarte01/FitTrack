@@ -15,6 +15,7 @@ DB_NAME = os.environ.get("FITTRACK_DB", "fittrack.db")
 MIN_SENHA = 8
 ITERACOES = 200_000
 ESCALA = 1        # tamanho geral da página (1 = design)
+HEADER_ESCALA = 1.4  # tamanho do avatar e dos textos "Fit Track" / "Jornada Fitness" (1 = design)
 CARD_ESCALA = 1.4  # tamanho só do quadro de baixo (campos, botões, textos); 1 = design, tente 1.2 a 1.8
 MODO_DEMO = True  # True: mostra o código de recuperação na tela. Em produção, use False e envie por email.
 
@@ -179,10 +180,10 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .block-container [data-testid="stHorizontalBlock"] { gap:8px; }
 
 /* textos */
-.ft-avatar { display:flex; justify-content:center; height:112px; }
+.ft-avatar { display:flex; justify-content:center; height:112px; zoom:__HEADER_ESCALA__; }
 .ft-avatar svg { display:block; }
-.ft-titulo { color:#fff; font-weight:700; font-size:27px; text-align:center; margin:0; line-height:34px; }
-.ft-sub { color:#e5e7eb; font-size:19px; text-align:center; margin:0 0 24px 0; line-height:26px; }
+.ft-titulo { color:#fff; font-weight:700; font-size:27px; text-align:center; margin:0; line-height:34px; zoom:__HEADER_ESCALA__; }
+.ft-sub { color:#e5e7eb; font-size:19px; text-align:center; margin:0 0 36px 0; line-height:26px; zoom:__HEADER_ESCALA__; }
 .ft-msg { text-align:center; font-size:14px; padding:2px 0; }
 .ft-erro { color:#fca5a5; } .ft-ok { color:#86efac; }
 .ft-bemvindo { color:#fff; text-align:center; font-size:18px; padding:10px; }
@@ -385,7 +386,8 @@ if tela == "home" and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
 
 st.markdown(CSS.replace("__LARGURA__", str(round(LARGURAS[tela] * CARD_ESCALA)))
-            .replace("__CARD_ESCALA__", str(CARD_ESCALA)).replace("__ESCALA__", str(ESCALA)).replace("__ICONES__", css_icones()),
+            .replace("__CARD_ESCALA__", str(CARD_ESCALA))
+            .replace("__HEADER_ESCALA__", str(HEADER_ESCALA)).replace("__ESCALA__", str(ESCALA)).replace("__ICONES__", css_icones()),
             unsafe_allow_html=True)
 with st.empty().container():
     TELAS[tela]()
