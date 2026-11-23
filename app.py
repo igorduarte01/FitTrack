@@ -286,6 +286,27 @@ def tem_objetivo(email):
     return obter_objetivo(email) is not None
 
 
+EMAIL_DEV = "dev@fittrack.local"
+
+
+def garantir_usuario_dev():
+    """Modo desenvolvedor: cria (se precisar) um usuário de teste com perfil completo, para abrir qualquer tela
+    sem preencher nada. A senha é aleatória e desconhecida, então ninguém consegue entrar com essa conta pelo login."""
+    con = conectar()
+    u = con.execute("SELECT id FROM usuarios WHERE email=?", (EMAIL_DEV,)).fetchone()
+    if not u:
+        salt = secrets.token_hex(16)
+        with con:
+            con.execute("INSERT INTO usuarios (email, senha_hash, salt) VALUES (?,?,?)",
+                        (EMAIL_DEV, gerar_hash(secrets.token_urlsafe(24), salt), salt))
+    con.close()
+    if not tem_perfil(EMAIL_DEV):
+        hoje = date.today()
+        nasc = date(hoje.year - 15, hoje.month, min(hoje.day, 28))
+        salvar_perfil(EMAIL_DEV, "Igor Duarte", nasc.strftime("%d/%m/%Y"), "58", "176", "Masculino")
+    return EMAIL_DEV
+
+
 # =========================== INTERFACE (Streamlit) ===========================
 st.set_page_config(page_title="FitTrack", page_icon="💪", layout="centered")
 criar_tabelas()
@@ -495,6 +516,13 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .st-key-zoom_obj [data-testid="stHorizontalBlock"], .st-key-zoom_resumo [data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; }
 .st-key-zoom_obj [data-testid="stColumn"], .st-key-zoom_resumo [data-testid="stColumn"] { min-width:0 !important; }
 .stApp [class*="st-key-obj_"] .stButton button [data-testid="stMarkdownContainer"] { flex:1; width:auto; text-align:left; }
+
+/* modo desenvolvedor: botão flutuante no canto inferior esquerdo */
+.st-key-dev_panel { position:fixed !important; left:8px; bottom:8px; z-index:9999; width:auto !important; gap:0 !important; }
+.st-key-dev_panel button { background:#7c3aed !important; color:#fff !important; border:none !important; font-size:12px;
+    min-height:28px; padding:2px 10px; border-radius:6px; opacity:.92; }
+.st-key-dev_panel button p { color:#fff !important; font-size:12px !important; font-weight:700 !important; }
+[class*="st-key-dev_ir_"] button, .st-key-dev_sair button { width:100%; justify-content:flex-start; font-size:13px; }
 
 __FADE__
 __ICONES__
@@ -931,6 +959,51 @@ def tela_objetivos():
         mostrar_msg()
 
 
+TELAS_DEV = [("login", "1 · Login"), ("cadastro", "2 · Crie sua conta"), ("perfil", "3 · Vamos conhecer você"),
+             ("resumo", "4 · Tudo pronto"), ("objetivos", "5 · Objetivos"),
+             ("esqueceu", "Recuperar senha"), ("home", "Boas-vindas (provisória)")]
+
+
+def modo_dev():
+    """Só liga se você pedir: variável de ambiente FITTRACK_DEV=1 (no seu computador) ou DEV_MODE = true nos Secrets."""
+    if os.environ.get("FITTRACK_DEV") == "1":
+        return True
+    try:
+        return bool(st.secrets.get("DEV_MODE", False))
+    except Exception:
+        return False
+
+
+def dev_ir(tela):
+    """Pula direto para a tela. As telas internas usam o usuário de teste (perfil já preenchido)."""
+    if tela in ("perfil", "resumo", "objetivos", "home"):
+        st.session_state.usuario = garantir_usuario_dev()
+    st.session_state.tela = tela
+    st.session_state.msg = None
+    st.session_state.fade_in = False
+
+
+def dev_sair():
+    st.session_state.usuario = None
+    st.session_state.objetivo = None
+    st.session_state.perf_gen = None
+    st.session_state.codigo_enviado = False
+    st.session_state.tela = "login"
+    st.session_state.msg = None
+
+
+def painel_dev():
+    if not modo_dev():
+        return
+    with st.container(key="dev_panel"):
+        with st.popover("🛠 DEV"):
+            st.markdown(f"**tela atual:** `{st.session_state.get('tela')}`  \n"
+                        f"**usuário:** `{st.session_state.get('usuario') or '-'}`")
+            for chave, rotulo in TELAS_DEV:
+                st.button(rotulo, key=f"dev_ir_{chave}", on_click=dev_ir, args=(chave,))
+            st.button("Sair / limpar sessão", key="dev_sair", on_click=dev_sair)
+
+
 TELAS = {"login": tela_login, "cadastro": tela_cadastro, "esqueceu": tela_esqueceu,
          "perfil": tela_perfil, "resumo": tela_resumo, "objetivos": tela_objetivos, "home": tela_home}
 
@@ -963,5 +1036,6 @@ st.markdown(CSS.replace("__LARGURA__", LARGURA_CSS)
             .replace("__ICONES__", css_icones() + "\n" + css_objetivos(st.session_state.get("objetivo")))
             .replace("__FADE__", FADE_CSS),
             unsafe_allow_html=True)
+painel_dev()  # só aparece no modo desenvolvedor
 with st.empty().container():
     TELAS[tela]()
