@@ -4,7 +4,8 @@ import os
 import re
 import secrets
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from urllib.parse import quote
 
@@ -42,6 +43,15 @@ def criar_tabelas():
             codigo_hash TEXT NOT NULL,
             expira_em TEXT NOT NULL,
             usado INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id))""")
+        con.execute("""CREATE TABLE IF NOT EXISTS perfis (
+            usuario_id INTEGER PRIMARY KEY,
+            nome TEXT NOT NULL,
+            nascimento TEXT NOT NULL,
+            peso_kg REAL NOT NULL,
+            altura_cm REAL NOT NULL,
+            genero TEXT NOT NULL,
+            atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id))""")
     con.close()
 
@@ -81,7 +91,7 @@ def cadastrar(email, senha, confirmar):
         with con:
             con.execute("INSERT INTO usuarios (email, senha_hash, salt) VALUES (?,?,?)",
                         (email, gerar_hash(senha, salt), salt))
-        return True, "Conta criada com sucesso! Faça login."
+        return True, "Conta criada com sucesso!"
     except sqlite3.IntegrityError:
         return False, "Este email já está cadastrado."
     finally:
@@ -141,11 +151,77 @@ def redefinir_senha(email, codigo, nova, confirmar):
         con.close()
 
 
+GENEROS = ["Masculino", "Feminino", "Outro"]
+
+
+def _numero(texto):
+    try:
+        return float(str(texto).strip().replace(",", "."))
+    except ValueError:
+        return None
+
+
+def tem_perfil(email):
+    con = conectar()
+    r = con.execute("""SELECT 1 FROM perfis p JOIN usuarios u ON u.id = p.usuario_id
+                       WHERE u.email = ?""", (email.strip().lower(),)).fetchone()
+    con.close()
+    return r is not None
+
+
+def obter_nome(email):
+    con = conectar()
+    r = con.execute("""SELECT p.nome FROM perfis p JOIN usuarios u ON u.id = p.usuario_id
+                       WHERE u.email = ?""", (email.strip().lower(),)).fetchone()
+    con.close()
+    return r["nome"] if r else None
+
+
+def salvar_perfil(email, nome, nascimento, peso, altura, genero):
+    """Tela 'Registrar conta' -> botão Criar conta."""
+    nome = " ".join((nome or "").split())
+    if len(nome) < 3 or len(nome) > 100 or len(nome.split()) < 2:
+        return False, "Informe seu nome completo."
+    try:
+        nasc = datetime.strptime((nascimento or "").strip(), "%d/%m/%Y").date()
+    except ValueError:
+        return False, "Data de nascimento inválida. Use o formato dd/mm/aaaa."
+    hoje = date.today()
+    idade = hoje.year - nasc.year - ((hoje.month, hoje.day) < (nasc.month, nasc.day))
+    if nasc > hoje or idade > 120:
+        return False, "Data de nascimento inválida."
+    peso_kg = _numero(peso)
+    if peso_kg is None or not 20 <= peso_kg <= 500:
+        return False, "Peso inválido. Informe em kg (entre 20 e 500)."
+    altura_cm = _numero(altura)
+    if altura_cm is None or not 50 <= altura_cm <= 260:
+        return False, "Altura inválida. Informe em cm (entre 50 e 260)."
+    if genero not in GENEROS:
+        return False, "Selecione o gênero."
+
+    con = conectar()
+    try:
+        u = con.execute("SELECT id FROM usuarios WHERE email=?", (email.strip().lower(),)).fetchone()
+        if not u:
+            return False, "Usuário não encontrado. Faça login novamente."
+        with con:
+            con.execute("""INSERT INTO perfis (usuario_id, nome, nascimento, peso_kg, altura_cm, genero)
+                           VALUES (?,?,?,?,?,?)
+                           ON CONFLICT(usuario_id) DO UPDATE SET
+                             nome=excluded.nome, nascimento=excluded.nascimento,
+                             peso_kg=excluded.peso_kg, altura_cm=excluded.altura_cm,
+                             genero=excluded.genero, atualizado_em=CURRENT_TIMESTAMP""",
+                        (u["id"], nome, nasc.isoformat(), peso_kg, altura_cm, genero))
+        return True, "Perfil criado com sucesso!"
+    finally:
+        con.close()
+
+
 # =========================== INTERFACE (Streamlit) ===========================
 st.set_page_config(page_title="Fit Track", page_icon="💪", layout="centered")
 criar_tabelas()
 
-LARGURAS = {"login": 620, "esqueceu": 620, "home": 620, "cadastro": 580}
+LARGURAS = {"login": 620, "esqueceu": 620, "home": 620, "cadastro": 580, "perfil": 620}
 
 SVG_EMAIL = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#d1d5db' "
              "stroke-width='1.8' stroke-linejoin='round'><rect x='2' y='5' width='20' height='14' rx='2'/>"
@@ -155,10 +231,22 @@ SVG_LOCK = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d
             "rx='2.5' fill='#d1d5db'/></svg>")
 
 
+SVG_PESSOA = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='8' r='4.2' fill='#d1d5db'/>"
+              "<path d='M3.5 21c0-5.2 4.2-7.2 8.5-7.2s8.5 2 8.5 7.2z' fill='#d1d5db'/></svg>")
+SVG_CALENDARIO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#d1d5db' stroke-width='1.8' "
+                  "stroke-linecap='round'><rect x='3' y='5' width='18' height='16' rx='2'/><path d='M3 10h18M8 3v4M16 3v4'/></svg>")
+SVG_PESO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#d1d5db' stroke-width='1.8' "
+            "stroke-linejoin='round'><path d='M6 21h12l2.5-11h-17z'/><circle cx='12' cy='6' r='2.6'/></svg>")
+SVG_ALTURA = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#d1d5db' stroke-width='1.8' "
+              "stroke-linecap='round' stroke-linejoin='round'><path d='M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4'/></svg>")
+
+
 def css_icones():
     """Ícones de email e cadeado dentro dos campos (como no design)."""
     grupos = ((SVG_EMAIL, ["login_email", "cad_email", "rec_email"]),
-              (SVG_LOCK, ["login_senha", "cad_senha", "cad_conf", "rec_nova", "rec_conf"]))
+              (SVG_LOCK, ["login_senha", "cad_senha", "cad_conf", "rec_nova", "rec_conf"]),
+              (SVG_PESSOA, ["perf_nome"]), (SVG_CALENDARIO, ["perf_nasc"]),
+              (SVG_PESO, ["perf_peso"]), (SVG_ALTURA, ["perf_altura"]))
     regras = []
     for svg, chaves in grupos:
         url = 'url("data:image/svg+xml,' + quote(svg) + '")'
@@ -166,6 +254,10 @@ def css_icones():
             regras.append(f'.st-key-{k} [data-testid="stTextInputRootElement"] {{ background-image:{url} !important; '
                           f'background-repeat:no-repeat; background-position:10px center; background-size:22px 22px; }}')
             regras.append(f'.st-key-{k} input {{ padding-left:44px !important; }}')
+    # ícone da terceira opção de gênero (pessoa neutra)
+    url_pessoa = 'url("data:image/svg+xml,' + quote(SVG_PESSOA) + '")'
+    regras.append('.st-key-perf_genero label:nth-child(3) p::before { content:""; display:inline-block; '
+                  f'width:34px; height:34px; background:{url_pessoa} center/contain no-repeat; }}')
     return "\n".join(regras)
 
 
@@ -229,6 +321,22 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .stButton button[kind="tertiary"] p, .stButton button[data-testid="stBaseButton-tertiary"] p {
     color:#e5e7eb !important; font-weight:400 !important; font-size:16px !important; line-height:1; }
 .st-key-btn_esq button { justify-content:flex-end !important; }
+
+/* tela Registrar conta */
+.ft-titulo-card { color:#fff; font-weight:700; font-size:26px; text-align:center; line-height:34px; margin:0; }
+.ft-genero { color:#e5e7eb; font-size:17px; text-align:center; line-height:22px; margin-top:4px; }
+.st-key-perf_genero [role="radiogroup"] { display:flex; justify-content:space-around; width:100%; gap:0; }
+.st-key-perf_genero label { flex-direction:row-reverse; align-items:center; gap:6px; margin:0; }
+.st-key-perf_genero label p { font-size:0 !important; line-height:1; }
+.st-key-perf_genero label:nth-child(1) p::before { content:"\\2642"; font-size:40px; font-weight:700; color:#7b9cff; line-height:1; }
+.st-key-perf_genero label:nth-child(2) p::before { content:"\\2640"; font-size:40px; font-weight:700; color:#ff5fa2; line-height:1; }
+.st-key-perf_genero label > div:first-child { background-color:#d9d9d9 !important; border:3px solid #000 !important; }
+.st-key-perf_genero label:has(input:checked) > div:first-child { background-color:#2563eb !important; }
+.st-key-painel_perfil .ft-sub { margin-bottom:10px; }
+.st-key-painel_perfil [data-testid="stImage"] { width:100% !important; }
+.st-key-painel_perfil img { width:100% !important; height:260px; object-fit:cover; display:block; }
+.ft-foto { height:260px; display:flex; align-items:center; justify-content:center;
+           background:linear-gradient(160deg,#1b2433 0%,#0b1220 100%); }
 
 __ICONES__
 </style>
@@ -294,7 +402,7 @@ def tela_login():
             ok, res = login(email, senha)
             if ok:
                 st.session_state.usuario = res
-                ir("home")
+                ir("home" if tem_perfil(res) else "perfil")
                 st.rerun()
             else:
                 aviso(res)
@@ -313,8 +421,8 @@ def tela_cadastro():
         if continuar:
             ok, res = cadastrar(email, senha, conf)
             if ok:
-                ir("login")
-                aviso(res, ok=True)
+                st.session_state.usuario = email.strip().lower()  # já entra logado
+                ir("perfil")  # vai direto para a tela "Registrar conta"
                 st.rerun()
             else:
                 aviso(res)
@@ -368,8 +476,9 @@ def tela_esqueceu():
 def tela_home():
     cabecalho("Fit Track", "Jornada Fitness")
     with st.container(key="card_home"):
-        email = html.escape(st.session_state.usuario or "")
-        st.markdown(f"<div class='ft-bemvindo'>Bem-vindo(a) ao Fit Track!<br>{email}</div>",
+        nome = obter_nome(st.session_state.usuario or "")
+        quem = html.escape(nome or st.session_state.usuario or "")
+        st.markdown(f"<div class='ft-bemvindo'>Bem-vindo(a) ao Fit Track!<br>{quem}</div>",
                     unsafe_allow_html=True)
         _, c2, _ = st.columns(COLUNAS_BOTAO)
         if c2.button("Sair", type="primary", key="btn_sair"):
@@ -378,11 +487,59 @@ def tela_home():
             st.rerun()
 
 
-TELAS = {"login": tela_login, "cadastro": tela_cadastro,
-         "esqueceu": tela_esqueceu, "home": tela_home}
+FOTO_FALLBACK = """
+<div class="ft-foto">
+<svg width="260" height="120" viewBox="0 0 260 120" xmlns="http://www.w3.org/2000/svg">
+  <rect x="20" y="40" width="22" height="40" rx="4" fill="#4b5563"/><rect x="42" y="25" width="26" height="70" rx="5" fill="#6b7280"/>
+  <rect x="68" y="54" width="124" height="12" rx="6" fill="#9ca3af"/>
+  <rect x="192" y="25" width="26" height="70" rx="5" fill="#6b7280"/><rect x="218" y="40" width="22" height="40" rx="4" fill="#4b5563"/>
+</svg></div>
+"""
+
+
+def foto_halteres():
+    """Coloque a foto em assets/halteres.jpg (ou .jpeg/.png) ao lado do app.py."""
+    pasta = Path(__file__).parent / "assets"
+    for nome in ("halteres.jpg", "halteres.jpeg", "halteres.png"):
+        if (pasta / nome).exists():
+            st.image(str(pasta / nome))
+            return
+    st.markdown(FOTO_FALLBACK, unsafe_allow_html=True)
+
+
+def tela_perfil():
+    esq, dir_ = st.columns([0.56, 0.44], gap="small")
+    with esq:
+        with st.container(key="card_perfil"):
+            st.markdown("<div class='ft-titulo-card'>Registrar conta</div>", unsafe_allow_html=True)
+            nome = campo("Nome completo", "perf_nome")
+            nasc = campo("00/00/0000", "perf_nasc")
+            peso = campo("Peso (kg)", "perf_peso")
+            altura = campo("Altura (cm)", "perf_altura")
+            st.markdown("<div class='ft-genero'>Gênero</div>", unsafe_allow_html=True)
+            genero = st.radio("Gênero", GENEROS, index=None, horizontal=True,
+                              key="perf_genero", label_visibility="collapsed")
+            _, c2, _ = st.columns([0.17, 0.66, 0.17])
+            if c2.button("Criar conta", type="primary", key="btn_criar_perfil"):
+                ok, res = salvar_perfil(st.session_state.usuario, nome, nasc, peso, altura, genero)
+                if ok:
+                    ir("home")
+                    aviso(res, ok=True)
+                    st.rerun()
+                else:
+                    aviso(res)
+            mostrar_msg()
+    with dir_:
+        with st.container(key="painel_perfil"):
+            cabecalho("Fit Track", "Jornada Fitness")
+            foto_halteres()
+
+
+TELAS = {"login": tela_login, "cadastro": tela_cadastro, "esqueceu": tela_esqueceu,
+         "perfil": tela_perfil, "home": tela_home}
 
 tela = st.session_state.tela
-if tela == "home" and not st.session_state.usuario:  # protege a tela interna
+if tela in ("home", "perfil") and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
 
 st.markdown(CSS.replace("__LARGURA__", str(round(LARGURAS[tela] * CARD_ESCALA)))
