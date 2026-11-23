@@ -69,6 +69,11 @@ def criar_tabelas():
             objetivo TEXT NOT NULL,
             atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id))""")
+        con.execute("""CREATE TABLE IF NOT EXISTS niveis (
+            usuario_id INTEGER PRIMARY KEY,
+            nivel TEXT NOT NULL,
+            atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id))""")
     con.close()
 
 
@@ -287,6 +292,42 @@ def tem_objetivo(email):
     return obter_objetivo(email) is not None
 
 
+NIVEIS = [("iniciante", "Iniciante", "Estou começando agora ou tenho pouca experiência."),
+          ("intermediario", "Intermediário", "Já treino há algum tempo e conheço os exercícios."),
+          ("avancado", "Avançado", "Tenho bastante experiência e treino regularmente.")]
+
+
+def salvar_nivel(email, chave):
+    rotulos = {c: t for c, t, _ in NIVEIS}
+    if chave not in rotulos:
+        return False, "Escolha uma opção para continuar."
+    con = conectar()
+    try:
+        u = con.execute("SELECT id FROM usuarios WHERE email=?", (email.strip().lower(),)).fetchone()
+        if not u:
+            return False, "Usuário não encontrado. Faça login novamente."
+        with con:
+            con.execute("""INSERT INTO niveis (usuario_id, nivel) VALUES (?, ?)
+                           ON CONFLICT(usuario_id) DO UPDATE SET
+                             nivel=excluded.nivel, atualizado_em=CURRENT_TIMESTAMP""",
+                        (u["id"], rotulos[chave]))
+        return True, "Nível salvo!"
+    finally:
+        con.close()
+
+
+def obter_nivel(email):
+    con = conectar()
+    r = con.execute("""SELECT n.nivel FROM niveis n JOIN usuarios u ON u.id = n.usuario_id
+                       WHERE u.email = ?""", (email.strip().lower(),)).fetchone()
+    con.close()
+    return r["nivel"] if r else None
+
+
+def tem_nivel(email):
+    return obter_nivel(email) is not None
+
+
 EMAIL_DEV = "dev@fittrack.local"
 
 
@@ -305,6 +346,10 @@ def garantir_usuario_dev():
         hoje = date.today()
         nasc = date(hoje.year - 15, hoje.month, min(hoje.day, 28))
         salvar_perfil(EMAIL_DEV, "Igor Duarte", nasc.strftime("%d/%m/%Y"), "58", "176", "Masculino")
+    if not tem_objetivo(EMAIL_DEV):
+        salvar_objetivo(EMAIL_DEV, "massa")
+    if not tem_nivel(EMAIL_DEV):
+        salvar_nivel(EMAIL_DEV, "intermediario")
     return EMAIL_DEV
 
 
@@ -335,7 +380,7 @@ SVG_ALTURA = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill=
 def css_icones():
     """Ícones de email e cadeado dentro dos campos (como no design)."""
     grupos = ((SVG_EMAIL, ["login_email", "cad_email", "rec_email"]),
-              (SVG_LOCK, ["login_senha", "cad_senha", "cad_conf", "rec_nova", "rec_conf"]),
+              (SVG_LOCK, ["login_senha", "cad_senha", "cad_conf", "rec_cod", "rec_nova", "rec_conf"]),
               (SVG_PESSOA, ["perf_nome"]), (SVG_CALENDARIO, ["perf_nasc"]),
               (SVG_PESO, ["perf_peso"]), (SVG_ALTURA, ["perf_altura"]))
     regras = []
@@ -511,16 +556,109 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .stApp [class*="st-key-obj_"] .stButton button p { color:#111; font-size:19px; font-weight:700; line-height:1.15; text-align:left; transition:color .35s ease; }
 .stApp [class*="st-key-obj_"] .stButton button::before { content:""; width:42px; height:42px; margin-right:12px; flex:none;
     background-repeat:no-repeat; background-position:center; background-size:contain; }
-.stApp .st-key-btn_obj_continuar .stButton button { height:50px; min-height:50px; border-radius:10px; }
-.stApp .st-key-btn_obj_continuar .stButton button p { font-size:22px !important; }
+.stApp .st-key-btn_obj_continuar .stButton button, .stApp .st-key-btn_niv_continuar .stButton button { height:50px; min-height:50px; border-radius:10px; }
+.stApp .st-key-btn_obj_continuar .stButton button p, .stApp .st-key-btn_niv_continuar .stButton button p { font-size:22px !important; }
 
 /* colunas nunca quebram linha nas telas 4 e 5 */
 .st-key-zoom_obj [data-testid="stHorizontalBlock"], .st-key-zoom_resumo [data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; }
 .st-key-zoom_obj [data-testid="stColumn"], .st-key-zoom_resumo [data-testid="stColumn"] { min-width:0 !important; }
 .stApp [class*="st-key-obj_"] .stButton button [data-testid="stMarkdownContainer"] { flex:1; width:auto; text-align:left; }
 
-/* modo desenvolvedor: botão flutuante no canto inferior esquerdo */
-.st-key-dev_panel { position:fixed !important; left:8px; bottom:8px; z-index:9999; width:auto !important; gap:0 !important; }
+/* ---------- recuperar senha (2 etapas) ---------- */
+.block-container .st-key-zoom_rec, .block-container .st-key-zoom_niv, .block-container .st-key-zoom_dash { zoom:__TELA_ESCALA__; width:100%; box-sizing:border-box; }
+.block-container .st-key-zoom_rec { padding:0 8px; gap:0; }
+.rc-logo { margin:2px 0 14px; } .rc-logo .ft-logo-p { justify-content:center; font-size:24px; }
+.block-container .st-key-painel_rec { background:#131d33; border:1px solid #2a3a58; border-radius:28px; padding:16px 20px 14px; gap:10px; }
+.rc-ico { display:flex; justify-content:center; margin-top:6px; } .rc-ico svg { width:38px; height:38px; }
+.rc-titulo { color:#fff; font-weight:700; font-size:22px; line-height:28px; text-align:center; margin:10px 0 0; }
+.rc-sub { color:#e5e7eb; font-size:14.5px; line-height:19px; text-align:center; margin:2px 0 0; }
+.rc-ok { color:#22e05a; font-weight:700; font-size:16px; text-align:center; margin:4px 0 0; }
+.rc-hr { height:1px; background:#4a5568; margin:14px 4px 6px; }
+.rc-nota { color:#e5e7eb; font-size:14px; text-align:center; margin:2px 0 6px; }
+.st-key-painel_rec [data-testid="stTextInputRootElement"] { background-color:#0a111f !important; border:1px solid #1e2a42 !important;
+    border-radius:8px !important; height:41px !important; min-height:41px !important; box-shadow:none !important; }
+.st-key-painel_rec div[data-baseweb="input"], .st-key-painel_rec div[data-baseweb="base-input"] { background:transparent !important; border:none !important; }
+.st-key-painel_rec input { background:transparent !important; color:#fff !important; font-size:17px; font-weight:700; height:41px;
+    padding-top:0; padding-bottom:0; padding-left:12px; }
+.st-key-painel_rec input::placeholder { color:#f3f4f6; opacity:1; font-weight:700; }
+.st-key-painel_rec [data-testid="stTextInputRootElement"] button { background:transparent !important; color:#d1d5db !important; }
+.stApp .st-key-btn_rec_enviar .stButton button, .stApp .st-key-btn_rec_redef .stButton button { height:40px; min-height:40px; border-radius:14px; }
+.stApp .st-key-btn_rec_enviar .stButton button p, .stApp .st-key-btn_rec_redef .stButton button p { font-size:16px !important; }
+.stApp .st-key-btn_rec_voltar .stButton button p { color:#fff !important; font-weight:700 !important; font-size:16px !important; }
+
+/* ---------- nível de experiência ---------- */
+.block-container .st-key-zoom_niv { gap:16px; padding:0 8px; }
+.nv-titulo { color:#fff; font-weight:700; font-size:22px; line-height:28px; margin:0 0 0 8px; }
+.nv-sub { color:#e5e7eb; font-size:15px; line-height:20px; margin:0 0 0 8px; }
+[class*="st-key-niv_"], [class*="st-key-niv_"] .stButton { width:100% !important; }
+.stApp [class*="st-key-niv_"] .stButton button { width:100% !important; height:64px; min-height:64px; background:#18294a; border:2px solid transparent;
+    border-radius:10px; justify-content:flex-start; padding:0 30px; box-shadow:none; transition:border-color .35s ease; }
+.stApp [class*="st-key-niv_"] .stButton button:hover { border-color:#2d4677; }
+.stApp [class*="st-key-niv_"] .stButton button [data-testid="stMarkdownContainer"] { flex:1; width:auto; text-align:left; }
+.stApp [class*="st-key-niv_"] .stButton button p { color:#fff; font-size:19px; font-weight:700; line-height:1.2; text-align:left; }
+
+/* ---------- dashboard ---------- */
+.block-container > [data-testid="stVerticalBlock"]:has(.st-key-zoom_dash) { justify-content:flex-start; }
+.block-container .st-key-zoom_dash { padding:8px 0; gap:0; }
+.st-key-zoom_dash [data-testid="stHorizontalBlock"] { gap:16px; align-items:flex-start !important; flex-wrap:nowrap !important; }
+.st-key-zoom_dash [data-testid="stColumn"] { min-width:0 !important; }
+.st-key-zoom_dash [data-testid="stColumn"]:has(.st-key-menu_lateral) { position:sticky; top:8px; align-self:flex-start; }
+.block-container .st-key-menu_lateral { position:relative; height:433px; background:#15223f; border-radius:16px; padding:16px 12px; gap:6px; box-sizing:border-box; }
+.dm-hr { height:1px; background:#4a5568; margin:14px 6px 16px; }
+.dm-label { color:#3b82f6; font-size:12px; font-weight:700; letter-spacing:.4px; margin:0 8px 6px; }
+[class*="st-key-mn_"], [class*="st-key-mn_"] .stButton { width:100% !important; }
+.stApp [class*="st-key-mn_"] .stButton button { width:100% !important; height:46px; min-height:46px; background:transparent; border:none; border-radius:12px;
+    justify-content:flex-start; padding:0 12px; box-shadow:none; }
+.stApp [class*="st-key-mn_"] .stButton button [data-testid="stMarkdownContainer"] { flex:1; width:auto; text-align:left; }
+.stApp [class*="st-key-mn_"] .stButton button p { color:#fff; font-size:19px; font-weight:500; text-align:left; line-height:1.1; }
+.stApp [class*="st-key-mn_"] .stButton button::before { content:""; width:24px; height:24px; margin-right:14px; flex:none;
+    background-repeat:no-repeat; background-position:center; background-size:contain; }
+.stApp .st-key-mn_sair .stButton button p { font-size:16px; font-weight:400; }
+.stApp .st-key-mn_sair .stButton button::before { width:22px; height:22px; margin-right:12px; }
+.st-key-menu_sair { position:absolute !important; left:12px; right:12px; bottom:14px; gap:6px; }
+.dm-hr-sair { height:1px; background:#4a5568; margin:0 6px 4px; }
+
+.db-data { color:#fff; font-size:12px; font-weight:700; letter-spacing:.3px; margin:8px 0 6px 12px; }
+.db-ola { color:#fff; font-size:20px; font-weight:700; line-height:26px; margin:0 0 20px 12px; }
+.db-evoluir { margin:0 0 6px 12px; } .db-evoluir b { display:block; color:#fff; font-size:20px; line-height:26px; }
+.db-evoluir span { display:block; color:#fff; font-size:15px; line-height:19px; }
+.db-obj { background:#3b5b9a; border-radius:14px; padding:12px 14px 14px 26px; margin:8px 0 16px; }
+.db-obj-l { color:#fff; font-size:11px; font-weight:700; letter-spacing:.3px; margin-left:-12px; }
+.db-obj-c { display:flex; align-items:center; gap:12px; margin-top:4px; margin-left:-12px; }
+.db-obj-c svg { width:42px; height:42px; flex:none; }
+.db-obj-t { color:#fff; font-size:19px; font-weight:700; line-height:24px; }
+.db-obj-n { color:#e5e7eb; font-size:12px; }
+.db-h { color:#fff; font-size:18px; font-weight:700; line-height:24px; margin:6px 0 8px 12px; }
+.db-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+.db-stat { background:#18294a; border-radius:12px; padding:10px 14px 12px; }
+.db-stat svg { width:22px; height:16px; display:block; }
+.db-stat b { display:block; color:#fff; font-size:28px; font-weight:500; line-height:32px; }
+.db-stat span { display:block; color:#e5e7eb; font-size:12px; }
+.block-container .st-key-db_rotina { background:#18294a; border-radius:14px; padding:14px 16px 14px; gap:10px; margin-bottom:6px; }
+.db-r-t { display:flex; justify-content:space-between; align-items:center; color:#fff; font-size:17px; font-weight:700; line-height:22px; }
+.db-r-t svg { width:18px; height:18px; }
+.db-r-s { color:#e5e7eb; font-size:13px; margin:22px 0 14px; }
+.db-semana { display:flex; justify-content:space-between; padding:0 6px; }
+.db-dia { display:flex; flex-direction:column; align-items:center; gap:4px; color:#fff; font-size:13px; }
+.db-dia svg { width:20px; height:20px; }
+.db-colchete { height:8px; border:1px solid #6b7a99; border-top:none; margin:4px 22px 6px; }
+.stApp .st-key-btn_db_montar .stButton button { height:34px; min-height:34px; border-radius:6px; }
+.stApp .st-key-btn_db_montar .stButton button p { font-size:14px !important; }
+.db-card { background:#18294a; border-radius:14px; padding:12px 16px 12px; margin-bottom:6px; }
+.db-card-topo { display:flex; justify-content:space-between; align-items:baseline; }
+.db-card-topo b { color:#fff; font-size:16px; } .db-card-topo i { color:#3b82f6; font-size:9px; font-style:normal; font-weight:700; letter-spacing:.3px; }
+.db-peso { color:#fff; font-size:28px; font-weight:700; line-height:34px; margin-top:10px; }
+.db-peso-s { color:#e5e7eb; font-size:10px; }
+.db-grafico { display:flex; justify-content:flex-end; margin:-6px 20px 4px 0; } .db-grafico svg { width:190px; height:54px; }
+.db-ativ { padding:8px 14px; }
+.db-ati { display:flex; align-items:center; gap:10px; padding:5px 0; }
+.db-ati > svg:first-child { width:28px; height:28px; flex:none; } .db-ati > svg:last-child { width:20px; height:20px; flex:none; }
+.db-ati > div { flex:1; } .db-ati b { display:block; color:#fff; font-size:14px; line-height:17px; } .db-ati span { display:block; color:#e5e7eb; font-size:12px; }
+.db-ph { background:#18294a; border-radius:14px; padding:26px 20px; color:#e5e7eb; font-size:16px; margin-top:20px; }
+.db-ph b { display:block; color:#fff; font-size:20px; margin-bottom:6px; }
+
+/* modo desenvolvedor: botão flutuante no canto superior direito */
+.st-key-dev_panel { position:fixed !important; right:8px; top:8px; z-index:9999; width:auto !important; gap:0 !important; }
 .st-key-dev_panel button { background:#7c3aed !important; color:#fff !important; border:none !important; font-size:12px;
     min-height:28px; padding:2px 10px; border-radius:6px; opacity:.92; }
 .st-key-dev_panel button p { color:#fff !important; font-size:12px !important; font-weight:700 !important; }
@@ -647,6 +785,8 @@ def destino_apos_login(email):
         return "perfil"
     if not tem_objetivo(email):
         return "objetivos"
+    if not tem_nivel(email):
+        return "niveis"
     return "home"
 
 
@@ -717,61 +857,215 @@ def enviar_codigo_por_email(email, codigo):
     })
 
 
+ICO_CADEADO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7 10V7a5 5 0 0110 0v3' fill='none' "
+               "stroke='#2f8bff' stroke-width='2.4'/><rect x='4' y='10' width='16' height='12' rx='3' fill='#2f8bff'/>"
+               "<circle cx='12' cy='15.5' r='1.7' fill='#131d33'/><rect x='11.2' y='16' width='1.6' height='3.4' rx='.8' fill='#131d33'/></svg>")
+
+
+def voltar_login():
+    st.session_state.codigo_enviado = False
+    ir("login")
+
+
+def pedir_codigo(email):
+    """Etapa 1 -> gera o código e envia por email. Devolve True se pode ir para a etapa 2."""
+    email = email.strip().lower()
+    if not email_valido(email):
+        aviso("Digite um email válido.")
+        return False
+    codigo = solicitar_reset(email)  # None se o email não existir (a tela não revela isso)
+    st.session_state.codigo_demo = None
+    if codigo:
+        if MODO_DEMO:
+            st.session_state.codigo_demo = codigo
+        else:
+            try:
+                enviar_codigo_por_email(email, codigo)
+            except Exception as erro:
+                print(f"[FitTrack] falha ao enviar email pelo Resend: {type(erro).__name__}: {erro}", flush=True)
+                aviso("Não foi possível enviar o email agora. Tente novamente em instantes.")
+                return False
+    st.session_state.rec_email_val = email
+    st.session_state.codigo_enviado = True
+    st.session_state.msg = None
+    return True
+
+
 def tela_esqueceu():
-    cabecalho_logo("Recuperar senha")
-    with st.container(key="card_esqueceu"):
-        email = campo("Email", "rec_email")
-        _, c2, _ = st.columns(COLUNAS_BOTAO)
-        if c2.button("Enviar código", type="primary", key="btn_enviar"):
-            codigo = solicitar_reset(email)
-            st.session_state.codigo_enviado = True
-            if codigo:
-                if MODO_DEMO:
-                    aviso(f"[SIMULAÇÃO DE EMAIL] Seu código: {codigo}", ok=True)
-                else:
-                    try:
-                        enviar_codigo_por_email(email.strip().lower(), codigo)
-                        aviso("Se o email estiver cadastrado, um código foi enviado.", ok=True)
-                    except Exception as erro:
-                        print(f"[FitTrack] falha ao enviar email pelo Resend: {type(erro).__name__}: {erro}", flush=True)
-                        aviso("Não foi possível enviar o email agora. Tente novamente em instantes.")
+    enviado = st.session_state.get("codigo_enviado")
+    with st.container(key="zoom_rec"):
+        st.markdown(f'<div class="rc-logo">{LOGO_P}</div>', unsafe_allow_html=True)
+        with st.container(key="painel_rec"):
+            if enviado:
+                demo = st.session_state.get("codigo_demo")
+                texto = "Código enviado!" + (f" (teste: {demo})" if demo else "")
+                sub_html = f'<div class="rc-ok">{html.escape(texto)}</div>'
             else:
-                aviso("Se o email estiver cadastrado, um código foi enviado.", ok=True)
-        mostrar_msg()
+                sub_html = '<div class="rc-sub">Não se preocupe! vamos ajudar você a recuperar o acesso à sua conta.</div>'
+            st.markdown(f'<div class="rc-ico">{ICO_CADEADO}</div><div class="rc-titulo">Esqueceu sua senha?</div>'
+                        f'{sub_html}<div class="rc-hr"></div>', unsafe_allow_html=True)
+            if not enviado:
+                email = campo("Email cadastrado", "rec_email")
+                _, c2, _ = st.columns([0.285, 0.43, 0.285])
+                if c2.button("Enviar código de recuperação", type="primary", key="btn_rec_enviar"):
+                    if pedir_codigo(email):
+                        st.rerun()
+                mostrar_msg()
+                st.markdown('<div class="rc-nota">Você receberá um código de 6 dígitos no seu e-mail.</div>',
+                            unsafe_allow_html=True)
+            else:
+                cod = campo("Código de 6 dígitos", "rec_cod")
+                nova = campo("Senha", "rec_nova", senha=True)
+                conf = campo("Confirmar senha", "rec_conf", senha=True)
+                _, c2, _ = st.columns([0.285, 0.43, 0.285])
+                if c2.button("Redefinir senha", type="primary", key="btn_rec_redef"):
+                    ok, res = redefinir_senha(st.session_state.get("rec_email_val") or "", cod, nova, conf)
+                    if ok:
+                        st.session_state.codigo_enviado = False
+                        ir("login")
+                        aviso(res, ok=True)
+                        st.rerun()
+                    else:
+                        aviso(res)
+                mostrar_msg()
+            st.button("Voltar para login", type="tertiary", key="btn_rec_voltar", on_click=voltar_login)
 
-        if st.session_state.get("codigo_enviado"):
-            cod = campo("Código de 6 dígitos", "rec_cod")
-            nova = campo("Nova senha", "rec_nova", senha=True)
-            conf = campo("Confirmar nova senha", "rec_conf", senha=True)
-            _, c2, _ = st.columns(COLUNAS_BOTAO)
-            if c2.button("Redefinir senha", type="primary", key="btn_redef"):
-                ok, res = redefinir_senha(email, cod, nova, conf)
-                if ok:
-                    st.session_state.codigo_enviado = False
-                    ir("login")
-                    aviso(res, ok=True)
-                    st.rerun()
-                else:
-                    aviso(res)
-                    st.rerun()
-        st.button("Voltar ao login", type="tertiary", key="btn_voltar",
-                  on_click=ir, args=("login",))
+
+DIAS_SEMANA = ["SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA", "QUINTA-FEIRA", "SEXTA-FEIRA", "SÁBADO", "DOMINGO"]
+MESES = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO",
+         "NOVEMBRO", "DEZEMBRO"]
+
+# EXEMPLOS FIXOS (como no design) até existir o registro de treinos: troque por dados reais depois.
+EXEMPLO_TREINOS, EXEMPLO_DIAS = 12, 5
+EXEMPLO_ATIVIDADES = [("massa", "Treino de peito", "Hoje - 45 min"), ("peso", "Treino de costas", "Ontem - 50 min"),
+                      ("forca", "Treino de braços", "Sexta - 35 min")]
+
+ICO_LAPIS = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#2f8bff' stroke-width='2' "
+             "stroke-linecap='round' stroke-linejoin='round'><path d='M4 20l1-5L16 4l4 4L9 19z'/><path d='M14 6l4 4'/></svg>")
+GRAFICO_PESO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 50'><polyline fill='none' stroke='#2f8bff' stroke-width='1.6' "
+                "points='6,40 28,34 50,38 72,24 94,34 116,20 138,14'/>"
+                + "".join(f"<circle cx='{x}' cy='{y}' r='2.2' fill='#2f8bff'/>"
+                          for x, y in ((6, 40), (28, 34), (50, 38), (72, 24), (94, 34), (116, 20), (138, 14))) + "</svg>")
+
+MENU_ITENS = [("inicio", "Início"), ("rotina", "Minha rotina"), ("progresso", "Progresso"), ("perfil", "Perfil")]
+MENU_ICONES = {
+    "inicio": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3 11l9-8 9 8v10h-6v-6H9v6H3z' fill='#fff'/></svg>",
+    "rotina": ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#fff' stroke-width='1.8' "
+               "stroke-linecap='round'><rect x='3' y='5' width='18' height='16' rx='2'/><path d='M3 10h18M8 3v4M16 3v4'/>"
+               "<path d='M8 14h2M12 14h2M16 14h.1M8 17.5h2M12 17.5h2' stroke-width='2'/></svg>"),
+    "progresso": ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='#fff'><rect x='3' y='13' width='4' height='8' rx='1'/>"
+                  "<rect x='10' y='9' width='4' height='12' rx='1'/><rect x='17' y='5' width='4' height='16' rx='1'/></svg>"),
+    "perfil": SVG_PESSOA.replace("#d1d5db", "#fff"),
+    "sair": ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#fff' stroke-width='2' "
+             "stroke-linecap='round' stroke-linejoin='round'><path d='M10 4H5v16h5'/><path d='M14 8l5 4-5 4M19 12H9'/></svg>"),
+}
 
 
-def tela_home():
-    cabecalho_logo()
-    with st.container(key="card_home"):
-        nome = obter_nome(st.session_state.usuario or "")
-        quem = html.escape(nome or st.session_state.usuario or "")
-        objetivo = obter_objetivo(st.session_state.usuario or "")
-        extra = f"<br>Objetivo: {html.escape(objetivo)}" if objetivo else ""
-        st.markdown(f"<div class='ft-bemvindo'>Bem-vindo(a) ao FitTrack!<br>{quem}{extra}</div>",
-                    unsafe_allow_html=True)
-        _, c2, _ = st.columns(COLUNAS_BOTAO)
-        if c2.button("Sair", type="primary", key="btn_sair"):
-            st.session_state.usuario = None
-            ir("login")
-            st.rerun()
+def css_dashboard(aba):
+    regras = []
+    for chave, svg in MENU_ICONES.items():
+        url = 'url("data:image/svg+xml,' + quote(svg) + '")'
+        regras.append(f'.stApp .st-key-mn_{chave} .stButton button::before {{ background-image:{url}; }}')
+    if aba in dict(MENU_ITENS):
+        regras.append(f'.stApp .st-key-mn_{aba} .stButton button {{ background:#2e4a86 !important; }}')
+        regras.append(f'.stApp .st-key-mn_{aba} .stButton button p {{ font-weight:700 !important; }}')
+    return "\n".join(regras)
+
+
+def css_niveis(selecionado):
+    """Descrição de cada nível dentro do botão e a borda azul do nível escolhido (a troca de cor faz o fade)."""
+    regras = []
+    for chave, titulo, descricao in NIVEIS:
+        regras.append(f'.stApp .st-key-niv_{chave} .stButton button p::after {{ content:"{descricao}"; display:block; '
+                      'font-size:15px; font-weight:400; color:#e5e7eb; line-height:1.25; }')
+    if selecionado in {c for c, _, _ in NIVEIS}:
+        regras.append(f'.stApp .st-key-niv_{selecionado} .stButton button {{ border-color:#3b82f6 !important; }}')
+    return "\n".join(regras)
+
+
+def abrir_aba(chave):
+    st.session_state.aba = chave
+    st.session_state.msg = None
+
+
+def sair_da_conta():
+    st.session_state.usuario = None
+    st.session_state.objetivo = None
+    st.session_state.nivel = None
+    st.session_state.aba = "inicio"
+    transitar("login")
+
+
+def html_dashboard(p, objetivo, nivel):
+    hoje = date.today()
+    data = f"{DIAS_SEMANA[hoje.weekday()]}, {hoje.day} DE {MESES[hoje.month - 1]}"
+    primeiro = (p["nome"].split() or ["atleta"])[0]
+    chave_obj = {r: c for c, r in OBJETIVOS}.get(objetivo, "massa")
+    nivel_txt = f"Nível {nivel.lower()}" if nivel else ""
+    return (f'<div class="db-data">{data}</div>'
+            f'<div class="db-ola">Olá {html.escape(normalizar_nome(primeiro))} 👋</div>'
+            '<div class="db-evoluir"><b>Vamos evoluir hoje?</b><span>Sua jornada continua. Mantenha o foco!</span></div>'
+            f'<div class="db-obj"><div class="db-obj-l">SEU OBJETIVO</div><div class="db-obj-c">{SVG_OBJ[chave_obj]}'
+            f'<div><div class="db-obj-t">{html.escape(objetivo or "Defina seu objetivo")}</div>'
+            f'<div class="db-obj-n">{html.escape(nivel_txt)}</div></div></div></div>'
+            '<div class="db-h">Seu resumo</div>'
+            f'<div class="db-grid"><div class="db-stat">{SVG_HALTER}<b>{EXEMPLO_TREINOS}</b><span>Treinos realizados</span></div>'
+            f'<div class="db-stat">{SVG_OBJ["gordura"]}<b>{EXEMPLO_DIAS}</b><span>Dias ativos</span></div></div>')
+
+
+def html_rotina():
+    dias = "".join(f'<div class="db-dia">{ICO_LAPIS}<span>{d}</span></div>'
+                   for d in ("dom", "seg", "ter", "qua", "qui", "sex", "sab"))
+    return (f'<div class="db-r-t"><span>Sua rotina</span>{ICO_CAL}</div>'
+            '<div class="db-r-s">Você ainda não possui uma rotina de treino</div>'
+            f'<div class="db-semana">{dias}</div><div class="db-colchete"></div>')
+
+
+def html_evolucao(peso_kg):
+    atividades = "".join(f'<div class="db-ati">{SVG_OBJ[c]}<div><b>{t}</b><span>{d}</span></div>{ICO_CHECK}</div>'
+                         for c, t, d in EXEMPLO_ATIVIDADES)
+    return ('<div class="db-h">Sua evolução</div><div class="db-card"><div class="db-card-topo"><b>Evolução do peso</b>'
+            '<i>ÚLTIMOS 30 DIAS</i></div>'
+            f'<div class="db-peso">{_fmt_num(peso_kg)} kg</div>'
+            '<div class="db-peso-s">Acompanhe as mudanças ao longo do tempo.</div>'
+            f'<div class="db-grafico">{GRAFICO_PESO}</div></div>'
+            f'<div class="db-h">Atividade recente</div><div class="db-card db-ativ">{atividades}</div>')
+
+
+def tela_dashboard():
+    email = st.session_state.usuario or ""
+    p = obter_perfil(email)
+    if not p:
+        ir("perfil")
+        st.rerun()
+        return
+    aba = st.session_state.get("aba") or "inicio"
+    with st.container(key="zoom_dash"):
+        esq, dir_ = st.columns([0.34, 0.66], gap="small")
+        with esq:
+            with st.container(key="menu_lateral"):  # fica fixo enquanto a página rola
+                st.markdown(f'{LOGO_P}<div class="dm-hr"></div><div class="dm-label">MENU PRINCIPAL</div>',
+                            unsafe_allow_html=True)
+                for chave, rotulo in MENU_ITENS:
+                    st.button(rotulo, key=f"mn_{chave}", on_click=abrir_aba, args=(chave,))
+                with st.container(key="menu_sair"):
+                    st.markdown('<div class="dm-hr-sair"></div>', unsafe_allow_html=True)
+                    if st.button("Sair", key="mn_sair"):
+                        sair_da_conta()
+        with dir_:
+            if aba == "inicio":
+                st.markdown(html_dashboard(p, obter_objetivo(email), obter_nivel(email)), unsafe_allow_html=True)
+                with st.container(key="db_rotina"):
+                    st.markdown(html_rotina(), unsafe_allow_html=True)
+                    _, c2, _ = st.columns([0.2, 0.6, 0.2])
+                    if c2.button("+ Montar minha rotina", type="primary", key="btn_db_montar"):
+                        aviso("A montagem da rotina chega na próxima tela.")
+                    mostrar_msg()
+                st.markdown(html_evolucao(p["peso_kg"]), unsafe_allow_html=True)
+            else:
+                nome_aba = dict(MENU_ITENS)[aba]
+                st.markdown(f'<div class="db-ph"><b>{nome_aba}</b>Esta área estará disponível em breve.</div>',
+                            unsafe_allow_html=True)
 
 
 MASCARA_DATA_JS = """
@@ -955,16 +1249,41 @@ def tela_objetivos():
         if c2.button("Continuar", type="primary", key="btn_obj_continuar"):
             ok, res = salvar_objetivo(st.session_state.usuario, escolhido)
             if ok:
-                ir("home")
-                st.rerun()
+                transitar("niveis")  # fade -> tela de nível de experiência
             else:
                 aviso(res)
         mostrar_msg()
 
 
-TELAS_DEV = [("login", "1 · Login"), ("cadastro", "2 · Crie sua conta"), ("perfil", "3 · Vamos conhecer você"),
-             ("resumo", "4 · Tudo pronto"), ("objetivos", "5 · Objetivos"),
-             ("esqueceu", "Recuperar senha"), ("home", "Boas-vindas (provisória)")]
+def escolher_nivel(chave):
+    st.session_state.nivel = chave
+    st.session_state.msg = None
+
+
+def tela_niveis():
+    escolhido = st.session_state.get("nivel")
+    with st.container(key="zoom_niv"):
+        st.markdown(f'<div class="ob-logo">{LOGO_P}</div><div class="ob-hr" style="margin-bottom:14px"></div>'
+                    '<div class="nv-titulo">Qual é seu nível de experiência?</div>'
+                    '<div class="nv-sub">Queremos entender sua experiência com os treinos para adaptar sua jornada.</div>',
+                    unsafe_allow_html=True)
+        for chave, titulo, _ in NIVEIS:
+            st.button(titulo, key=f"niv_{chave}", on_click=escolher_nivel, args=(chave,))
+        _, c2, _ = st.columns([0.27, 0.46, 0.27])
+        if c2.button("Continuar", type="primary", key="btn_niv_continuar"):
+            ok, res = salvar_nivel(st.session_state.usuario, escolhido)
+            if ok:
+                transitar("home")  # fade -> dashboard
+            else:
+                aviso(res)
+        mostrar_msg()
+
+
+TELAS_DEV = [("login", "1 · Login", "login"), ("cadastro", "2 · Crie sua conta", "cadastro"),
+             ("perfil", "3 · Vamos conhecer você", "perfil"), ("resumo", "4 · Tudo pronto", "resumo"),
+             ("objetivos", "5 · Objetivos", "objetivos"), ("niveis", "6 · Nível de experiência", "niveis"),
+             ("esqueceu", "Recuperar senha · etapa 1", "esqueceu"), ("esqueceu2", "Recuperar senha · etapa 2", "esqueceu"),
+             ("home", "Dashboard", "home")]
 
 
 def modo_dev():
@@ -977,18 +1296,23 @@ def modo_dev():
         return False
 
 
-def dev_ir(tela):
-    """Pula direto para a tela. As telas internas usam o usuário de teste (perfil já preenchido)."""
-    if tela in ("perfil", "resumo", "objetivos", "home"):
+def dev_ir(chave):
+    """Pula direto para a tela. As telas internas usam o usuário de teste (tudo já preenchido)."""
+    tela = {c: t for c, _, t in TELAS_DEV}[chave]
+    if tela in ("perfil", "resumo", "objetivos", "niveis", "home"):
         st.session_state.usuario = garantir_usuario_dev()
     st.session_state.tela = tela
     st.session_state.msg = None
     st.session_state.fade_in = False
+    st.session_state.aba = "inicio"
+    st.session_state.codigo_enviado = chave == "esqueceu2"
+    st.session_state.rec_email_val = EMAIL_DEV if chave == "esqueceu2" else None
 
 
 def dev_sair():
     st.session_state.usuario = None
     st.session_state.objetivo = None
+    st.session_state.nivel = None
     st.session_state.perf_gen = None
     st.session_state.codigo_enviado = False
     st.session_state.tela = "login"
@@ -1002,21 +1326,22 @@ def painel_dev():
         with st.popover("🛠 DEV"):
             st.markdown(f"**tela atual:** `{st.session_state.get('tela')}`  \n"
                         f"**usuário:** `{st.session_state.get('usuario') or '-'}`")
-            for chave, rotulo in TELAS_DEV:
+            for chave, rotulo, _ in TELAS_DEV:
                 st.button(rotulo, key=f"dev_ir_{chave}", on_click=dev_ir, args=(chave,))
             st.button("Sair / limpar sessão", key="dev_sair", on_click=dev_sair)
 
 
 TELAS = {"login": tela_login, "cadastro": tela_cadastro, "esqueceu": tela_esqueceu,
-         "perfil": tela_perfil, "resumo": tela_resumo, "objetivos": tela_objetivos, "home": tela_home}
+         "perfil": tela_perfil, "resumo": tela_resumo, "objetivos": tela_objetivos, "niveis": tela_niveis,
+         "home": tela_dashboard}
 
 tela = st.session_state.tela
-if tela in ("home", "perfil", "resumo", "objetivos") and not st.session_state.usuario:  # protege a tela interna
+if tela in ("home", "perfil", "resumo", "objetivos", "niveis") and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
 
 # larguras: "Registrar conta" ocupa quase toda a janela; as telas 4 e 5 seguem o tamanho do design
 # "Recuperar senha" é mais comprida (vários campos): usa escalas menores para não rolar a página
-HEADER_USADO, CARD_USADO = (1.0, 1.1) if tela == "esqueceu" else (HEADER_ESCALA, CARD_ESCALA)
+HEADER_USADO, CARD_USADO = HEADER_ESCALA, CARD_ESCALA
 
 if tela == "perfil":
     LARGURA_CSS = "min(1280px, 96vw)"
@@ -1024,6 +1349,12 @@ elif tela == "resumo":
     LARGURA_CSS = f"{round(711 * TELA_ESCALA)}px"
 elif tela == "objetivos":
     LARGURA_CSS = f"{round(709 * TELA_ESCALA)}px"
+elif tela == "esqueceu":
+    LARGURA_CSS = f"{round(713 * TELA_ESCALA)}px"
+elif tela == "niveis":
+    LARGURA_CSS = f"{round(716 * TELA_ESCALA)}px"
+elif tela == "home":
+    LARGURA_CSS = f"{round(714 * TELA_ESCALA)}px"
 else:
     LARGURA_CSS = f"{round(LARGURAS[tela] * CARD_USADO)}px"
 
@@ -1036,7 +1367,9 @@ st.markdown(CSS.replace("__LARGURA__", LARGURA_CSS)
             .replace("__HEADER_ESCALA__", str(HEADER_USADO))
             .replace("__TELA_ESCALA__", str(TELA_ESCALA))
             .replace("__ESCALA__", str(ESCALA))
-            .replace("__ICONES__", css_icones() + "\n" + css_objetivos(st.session_state.get("objetivo")))
+            .replace("__ICONES__", css_icones() + "\n" + css_objetivos(st.session_state.get("objetivo")) + "\n"
+                     + css_niveis(st.session_state.get("nivel")) + "\n"
+                     + css_dashboard(st.session_state.get("aba") or "inicio"))
             .replace("__FADE__", FADE_CSS),
             unsafe_allow_html=True)
 painel_dev()  # só aparece no modo desenvolvedor
