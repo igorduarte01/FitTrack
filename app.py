@@ -192,9 +192,14 @@ def obter_nome(email):
     return r["nome"] if r else None
 
 
+def normalizar_nome(nome):
+    """Primeira letra de cada palavra (depois de cada espaço) em maiúscula: 'igor duarte' -> 'Igor Duarte'."""
+    return " ".join(palavra[:1].upper() + palavra[1:].lower() for palavra in (nome or "").split())
+
+
 def salvar_perfil(email, nome, nascimento, peso, altura, genero):
     """Tela 'Registrar conta' -> botão Criar conta."""
-    nome = " ".join((nome or "").split())
+    nome = normalizar_nome(nome)
     if len(nome) < 3 or len(nome) > 100 or len(nome.split()) < 2:
         return False, "Informe seu nome completo."
     try:
@@ -805,6 +810,11 @@ def foto_halteres():
     st.markdown(FOTO_FALLBACK, unsafe_allow_html=True)
 
 
+def formatar_nome():
+    """Ao sair do campo, o nome já aparece com as iniciais maiúsculas."""
+    st.session_state.perf_nome = normalizar_nome(st.session_state.get("perf_nome", "") or "")
+
+
 def formatar_data():
     """Ao sair do campo, 12102010 vira 12/10/2010 (reserva caso a máscara em tempo real não funcione)."""
     d = re.sub(r"\D", "", st.session_state.get("perf_nasc", "") or "")[:8]
@@ -822,7 +832,7 @@ def tela_perfil():
     with esq:
         with st.container(key="card_perfil"):
             st.markdown("<div class='ft-titulo-card'>Vamos conhecer você!</div>", unsafe_allow_html=True)
-            nome = campo("Nome completo", "perf_nome")
+            nome = campo("Nome completo", "perf_nome", on_change=formatar_nome)
             nasc = campo("00/00/0000", "perf_nasc", on_change=formatar_data)
             peso = campo("Peso (kg)", "perf_peso")
             altura = campo("Altura (cm)", "perf_altura")
@@ -882,7 +892,7 @@ def tela_resumo():
     lista = "".join(f'<div class="rs-item">{ico}<div><div class="rs-lbl">{rot}</div>'
                     f'<div class="rs-val">{html.escape(val)}</div></div></div>' for ico, rot, val in itens)
     esquerda = (f'{LOGO_P}<div class="rs-hr"></div><div class="rs-avatar">{SVG_AVATAR}</div>'
-                f'<div class="rs-nome">{html.escape(p["nome"])}</div><div class="rs-hr"></div>'
+                f'<div class="rs-nome">{html.escape(normalizar_nome(p["nome"]))}</div><div class="rs-hr"></div>'
                 f'<div class="rs-titulo">SEU PERFIL</div>{lista}')
     with st.container(key="zoom_resumo"):
         esq, dir_ = st.columns([0.39, 0.61], gap="small")
