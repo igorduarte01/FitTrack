@@ -17,6 +17,7 @@ MIN_SENHA = 8
 ITERACOES = 200_000
 ESCALA = 1        # tamanho geral da página (1 = design)
 HEADER_ESCALA = 1.4  # tamanho do avatar e dos textos "Fit Track" / "Jornada Fitness" (1 = design)
+PERFIL_ESCALA = 1.5  # tamanho do quadro da tela "Registrar conta" (1 = design)
 CARD_ESCALA = 1.4  # tamanho só do quadro de baixo (campos, botões, textos); 1 = design, tente 1.2 a 1.8
 MODO_DEMO = True  # True: mostra o código de recuperação na tela. Em produção, use False e envie por email.
 
@@ -254,10 +255,22 @@ def css_icones():
             regras.append(f'.st-key-{k} [data-testid="stTextInputRootElement"] {{ background-image:{url} !important; '
                           f'background-repeat:no-repeat; background-position:10px center; background-size:22px 22px; }}')
             regras.append(f'.st-key-{k} input {{ padding-left:44px !important; }}')
-    # ícone da terceira opção de gênero (pessoa neutra)
+    # botões de gênero: ♂ azul, ♀ rosa, pessoa cinza, cada um com o círculo ao lado
     url_pessoa = 'url("data:image/svg+xml,' + quote(SVG_PESSOA) + '")'
-    regras.append('.st-key-perf_genero label:nth-child(3) p::before { content:""; display:inline-block; '
-                  f'width:34px; height:34px; background:{url_pessoa} center/contain no-repeat; }}')
+    base = '.stApp [class*="st-key-gen_"] .stButton button[kind="tertiary"]'
+    regras.append('[class*="st-key-gen_"] { display:flex; justify-content:center; width:100%; }')
+    regras.append(f'{base} {{ gap:8px; }}')
+    regras.append(f'{base} p {{ font-size:40px !important; font-weight:700 !important; line-height:1 !important; }}')
+    regras.append(f'{base}::after {{ content:""; width:22px; height:22px; box-sizing:border-box; border-radius:50%; '
+                  'background:#d9d9d9; border:3px solid #000; flex:none; }')
+    regras.append('.stApp [class*="st-key-gen_on_"] .stButton button[kind="tertiary"]::after { background:#2563eb; }')
+    for estado in ("on", "off"):
+        topo = f'.stApp .st-key-gen_{estado}_'
+        regras.append(f'{topo}m .stButton button[kind="tertiary"] p {{ color:#7b9cff !important; }}')
+        regras.append(f'{topo}f .stButton button[kind="tertiary"] p {{ color:#ff5fa2 !important; }}')
+        regras.append(f'{topo}o .stButton button[kind="tertiary"] p {{ font-size:0 !important; }}')
+        regras.append(f'{topo}o .stButton button[kind="tertiary"] p::before {{ content:""; display:inline-block; '
+                      f'width:34px; height:34px; background:{url_pessoa} center/contain no-repeat; }}')
     return "\n".join(regras)
 
 
@@ -267,7 +280,7 @@ CSS = """
 .stApp, .stApp *:not([data-testid="stIconMaterial"]) { font-family:'Space Grotesk',sans-serif; }
 .stApp { background:#0b1220; }
 header[data-testid="stHeader"], #MainMenu, footer { display:none; }
-.block-container { max-width:__LARGURA__px; padding:8px 0 0 0; zoom:__ESCALA__; }
+.block-container { max-width:__LARGURA__; padding:8px 0 0 0; zoom:__ESCALA__; }
 .block-container [data-testid="stVerticalBlock"] { gap:0; }
 .block-container [data-testid="stHorizontalBlock"] { gap:8px; }
 
@@ -323,19 +336,13 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .st-key-btn_esq button { justify-content:flex-end !important; }
 
 /* tela Registrar conta */
+.block-container .st-key-card_perfil { zoom:__PERFIL_ESCALA__; }
 .ft-titulo-card { color:#fff; font-weight:700; font-size:26px; text-align:center; line-height:34px; margin:0; }
 .ft-genero { color:#e5e7eb; font-size:17px; text-align:center; line-height:22px; margin-top:4px; }
-.st-key-perf_genero [role="radiogroup"] { display:flex; justify-content:space-around; width:100%; gap:0; }
-.st-key-perf_genero label { flex-direction:row-reverse; align-items:center; gap:6px; margin:0; }
-.st-key-perf_genero label p { font-size:0 !important; line-height:1; }
-.st-key-perf_genero label:nth-child(1) p::before { content:"\\2642"; font-size:40px; font-weight:700; color:#7b9cff; line-height:1; }
-.st-key-perf_genero label:nth-child(2) p::before { content:"\\2640"; font-size:40px; font-weight:700; color:#ff5fa2; line-height:1; }
-.st-key-perf_genero label > div:first-child { background-color:#d9d9d9 !important; border:3px solid #000 !important; }
-.st-key-perf_genero label:has(input:checked) > div:first-child { background-color:#2563eb !important; }
 .st-key-painel_perfil .ft-sub { margin-bottom:10px; }
 .st-key-painel_perfil [data-testid="stImage"] { width:100% !important; }
-.st-key-painel_perfil img { width:100% !important; height:260px; object-fit:cover; display:block; }
-.ft-foto { height:260px; display:flex; align-items:center; justify-content:center;
+.st-key-painel_perfil img { width:100% !important; height:300px; object-fit:cover; display:block; }
+.ft-foto { height:300px; display:flex; align-items:center; justify-content:center;
            background:linear-gradient(160deg,#1b2433 0%,#0b1220 100%); }
 
 __ICONES__
@@ -422,6 +429,7 @@ def tela_cadastro():
             ok, res = cadastrar(email, senha, conf)
             if ok:
                 st.session_state.usuario = email.strip().lower()  # já entra logado
+                st.session_state.perf_gen = None
                 ir("perfil")  # vai direto para a tela "Registrar conta"
                 st.rerun()
             else:
@@ -507,6 +515,10 @@ def foto_halteres():
     st.markdown(FOTO_FALLBACK, unsafe_allow_html=True)
 
 
+def escolher_genero(valor):
+    st.session_state.perf_gen = valor
+
+
 def tela_perfil():
     esq, dir_ = st.columns([0.56, 0.44], gap="small")
     with esq:
@@ -517,8 +529,14 @@ def tela_perfil():
             peso = campo("Peso (kg)", "perf_peso")
             altura = campo("Altura (cm)", "perf_altura")
             st.markdown("<div class='ft-genero'>Gênero</div>", unsafe_allow_html=True)
-            genero = st.radio("Gênero", GENEROS, index=None, horizontal=True,
-                              key="perf_genero", label_visibility="collapsed")
+            genero = st.session_state.get("perf_gen")
+            colunas = st.columns(3)
+            for col, valor, letra, rotulo in ((colunas[0], "Masculino", "m", "♂"),
+                                              (colunas[1], "Feminino", "f", "♀"),
+                                              (colunas[2], "Outro", "o", "Outro")):
+                estado = "on" if genero == valor else "off"
+                col.button(rotulo, type="tertiary", key=f"gen_{estado}_{letra}",
+                           on_click=escolher_genero, args=(valor,))
             _, c2, _ = st.columns([0.17, 0.66, 0.17])
             if c2.button("Criar conta", type="primary", key="btn_criar_perfil"):
                 ok, res = salvar_perfil(st.session_state.usuario, nome, nasc, peso, altura, genero)
@@ -542,7 +560,12 @@ tela = st.session_state.tela
 if tela in ("home", "perfil") and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
 
-st.markdown(CSS.replace("__LARGURA__", str(round(LARGURAS[tela] * CARD_ESCALA)))
+# "Registrar conta" ocupa quase toda a largura da janela; as demais telas ficam centralizadas
+LARGURA_CSS = ("min(1280px, 96vw)" if tela == "perfil"
+               else f"{round(LARGURAS[tela] * CARD_ESCALA)}px")
+
+st.markdown(CSS.replace("__LARGURA__", LARGURA_CSS)
+            .replace("__PERFIL_ESCALA__", str(PERFIL_ESCALA))
             .replace("__CARD_ESCALA__", str(CARD_ESCALA))
             .replace("__HEADER_ESCALA__", str(HEADER_ESCALA)).replace("__ESCALA__", str(ESCALA)).replace("__ICONES__", css_icones()),
             unsafe_allow_html=True)
