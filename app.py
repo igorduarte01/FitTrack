@@ -268,7 +268,9 @@ def css_icones():
     # botões de gênero: ♂ azul, ♀ rosa, pessoa cinza, cada um com o círculo ao lado
     url_pessoa = 'url("data:image/svg+xml,' + quote(SVG_PESSOA) + '")'
     base = '.stApp [class*="st-key-gen_"] .stButton button[kind="tertiary"]'
-    regras.append('[class*="st-key-gen_"] { display:flex; justify-content:center; width:100%; }')
+    regras.append('[class*="st-key-gen_"] { display:flex; justify-content:center; align-items:center; width:100%; }')
+    regras.append('[data-testid="stColumn"]:has([class*="st-key-gen_"]) { display:flex; justify-content:center; }')
+    regras.append('.stApp [class*="st-key-gen_"] .stButton button { margin:0 auto; min-width:0; }')
     regras.append(f'{base} {{ gap:8px; width:auto !important; padding:0 6px; }}')
     regras.append('.stApp [class*="st-key-gen_"] .stButton { width:auto !important; }')
     regras.append('.stApp [class*="st-key-gen_"] .stButton button [data-testid="stMarkdownContainer"] '
@@ -359,13 +361,14 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .ft-titulo-card { color:#fff; font-weight:700; font-size:26px; text-align:center; line-height:34px; margin:0; }
 .ft-genero { color:#e5e7eb; font-size:17px; text-align:center; line-height:22px; margin-top:4px; }
 .st-key-painel_perfil .ft-sub { margin-bottom:10px; }
+.st-key-painel_perfil .ft-titulo, .st-key-painel_perfil .ft-sub, .st-key-painel_perfil .ft-avatar { position:relative; z-index:2; }
 .st-key-painel_perfil [data-testid="stImage"] { width:100% !important; }
 .st-key-painel_perfil img { width:calc(100% + (100vw - min(1280px, 96vw)) / 2) !important; max-width:none !important;
-    height:320px; object-fit:cover; display:block;
+    height:370px; margin-top:-30px; position:relative; z-index:0; object-fit:cover; display:block;
     /* degradê: a foto some suavemente no fundo escuro, em cima e embaixo */
     -webkit-mask-image:linear-gradient(to bottom, transparent 0%, #000 28%, #000 72%, transparent 100%);
             mask-image:linear-gradient(to bottom, transparent 0%, #000 28%, #000 72%, transparent 100%); }
-.ft-foto { height:320px; display:flex; align-items:center; justify-content:center;
+.ft-foto { height:370px; margin-top:-30px; display:flex; align-items:center; justify-content:center;
            background:linear-gradient(160deg,#1b2433 0%,#0b1220 100%); }
 
 __ICONES__
@@ -593,6 +596,7 @@ def formatar_data():
 
 def escolher_genero(valor):
     st.session_state.perf_gen = valor
+    st.session_state.msg = None
 
 
 def tela_perfil():
