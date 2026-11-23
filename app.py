@@ -486,6 +486,11 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .stApp .st-key-btn_obj_continuar .stButton button { height:50px; min-height:50px; border-radius:10px; }
 .stApp .st-key-btn_obj_continuar .stButton button p { font-size:22px !important; }
 
+/* colunas nunca quebram linha nas telas 4 e 5 */
+.st-key-zoom_obj [data-testid="stHorizontalBlock"], .st-key-zoom_resumo [data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; }
+.st-key-zoom_obj [data-testid="stColumn"], .st-key-zoom_resumo [data-testid="stColumn"] { min-width:0 !important; }
+.stApp [class*="st-key-obj_"] .stButton button [data-testid="stMarkdownContainer"] { flex:1; width:auto; text-align:left; }
+
 __FADE__
 __ICONES__
 </style>
@@ -635,7 +640,8 @@ def tela_login():
             else:
                 aviso(res)
         mostrar_msg()
-        st.button("Não tem uma conta? **Criar conta**", type="tertiary", key="btn_criar", on_click=ir, args=("cadastro",))
+        if st.button("Não tem uma conta? **Criar conta**", type="tertiary", key="btn_criar"):
+            transitar("cadastro")  # fade: tela 1 -> tela 2
 
 
 def tela_cadastro():
@@ -652,8 +658,7 @@ def tela_cadastro():
                 st.session_state.usuario = email.strip().lower()  # já entra logado
                 st.session_state.perf_gen = None
                 st.session_state.objetivo = None
-                ir("perfil")  # vai direto para a tela "Registrar conta"
-                st.rerun()
+                transitar("perfil")  # fade: tela 2 -> tela 3
             else:
                 aviso(res)
         mostrar_msg()
@@ -692,7 +697,8 @@ def tela_esqueceu():
                     try:
                         enviar_codigo_por_email(email.strip().lower(), codigo)
                         aviso("Se o email estiver cadastrado, um código foi enviado.", ok=True)
-                    except Exception:
+                    except Exception as erro:
+                        print(f"[FitTrack] falha ao enviar email pelo Resend: {type(erro).__name__}: {erro}", flush=True)
                         aviso("Não foi possível enviar o email agora. Tente novamente em instantes.")
             else:
                 aviso("Se o email estiver cadastrado, um código foi enviado.", ok=True)
@@ -923,6 +929,9 @@ if tela in ("home", "perfil", "resumo", "objetivos") and not st.session_state.us
     tela = st.session_state.tela = "login"
 
 # larguras: "Registrar conta" ocupa quase toda a janela; as telas 4 e 5 seguem o tamanho do design
+# "Recuperar senha" é mais comprida (vários campos): usa escalas menores para não rolar a página
+HEADER_USADO, CARD_USADO = (1.0, 1.1) if tela == "esqueceu" else (HEADER_ESCALA, CARD_ESCALA)
+
 if tela == "perfil":
     LARGURA_CSS = "min(1280px, 96vw)"
 elif tela == "resumo":
@@ -930,15 +939,15 @@ elif tela == "resumo":
 elif tela == "objetivos":
     LARGURA_CSS = f"{round(709 * TELA_ESCALA)}px"
 else:
-    LARGURA_CSS = f"{round(LARGURAS[tela] * CARD_ESCALA)}px"
+    LARGURA_CSS = f"{round(LARGURAS[tela] * CARD_USADO)}px"
 
 # fade-in só quando a tela acabou de ser trocada por transitar()
 FADE_CSS = ".block-container { animation: ftfadein .6s ease both; }" if st.session_state.pop("fade_in", False) else ""
 
 st.markdown(CSS.replace("__LARGURA__", LARGURA_CSS)
             .replace("__PERFIL_ESCALA__", str(PERFIL_ESCALA))
-            .replace("__CARD_ESCALA__", str(CARD_ESCALA))
-            .replace("__HEADER_ESCALA__", str(HEADER_ESCALA))
+            .replace("__CARD_ESCALA__", str(CARD_USADO))
+            .replace("__HEADER_ESCALA__", str(HEADER_USADO))
             .replace("__TELA_ESCALA__", str(TELA_ESCALA))
             .replace("__ESCALA__", str(ESCALA))
             .replace("__ICONES__", css_icones() + "\n" + css_objetivos(st.session_state.get("objetivo")))
