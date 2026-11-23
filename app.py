@@ -23,7 +23,7 @@ MIN_SENHA = 8
 ITERACOES = 200_000
 ESCALA = 1        # tamanho geral da página (1 = design)
 HEADER_ESCALA = 1.4  # tamanho do avatar e dos textos "FitTrack" / "Jornada Fitness" (1 = design)
-PERFIL_ESCALA = 1.5  # tamanho do quadro da tela "Registrar conta" (1 = design)
+PERFIL_ESCALA = 1.45  # tamanho do quadro da tela "Registrar conta" (1 = design)
 CARD_ESCALA = 1.4  # tamanho só do quadro de baixo (campos, botões, textos); 1 = design, tente 1.2 a 1.8
 MODO_DEMO = True  # True: mostra o código de recuperação na tela. Em produção, use False e envie por email.
 
@@ -191,8 +191,9 @@ def salvar_perfil(email, nome, nascimento, peso, altura, genero):
         return False, "Informe seu nome completo."
     try:
         bruto = (nascimento or "").strip()
-        if re.fullmatch(r"\d{8}", bruto):
-            bruto = f"{bruto[:2]}/{bruto[2:4]}/{bruto[4:]}"
+        digitos = re.sub(r"\D", "", bruto)
+        if len(digitos) == 8:
+            bruto = f"{digitos[:2]}/{digitos[2:4]}/{digitos[4:]}"
         nasc = datetime.strptime(bruto, "%d/%m/%Y").date()
     except ValueError:
         return False, "Data de nascimento inválida. Use o formato dd/mm/aaaa."
@@ -268,11 +269,14 @@ def css_icones():
     url_pessoa = 'url("data:image/svg+xml,' + quote(SVG_PESSOA) + '")'
     base = '.stApp [class*="st-key-gen_"] .stButton button[kind="tertiary"]'
     regras.append('[class*="st-key-gen_"] { display:flex; justify-content:center; width:100%; }')
-    regras.append(f'{base} {{ gap:8px; }}')
+    regras.append(f'{base} {{ gap:8px; width:auto !important; padding:0 6px; }}')
+    regras.append('.stApp [class*="st-key-gen_"] .stButton { width:auto !important; }')
+    regras.append('.stApp [class*="st-key-gen_"] .stButton button [data-testid="stMarkdownContainer"] '
+                  '{ width:auto !important; flex:none !important; }')
     regras.append(f'{base} p {{ font-size:40px !important; font-weight:700 !important; line-height:1 !important; }}')
     regras.append(f'{base}::after {{ content:""; width:22px; height:22px; box-sizing:border-box; border-radius:50%; '
                   'background:#d9d9d9; border:3px solid #000; flex:none; }')
-    for letra, cor in (("m", "#3b82f6"), ("f", "#ff5fa2"), ("o", "#9ca3af")):  # azul, rosa, cinza
+    for letra, cor in (("m", "#3b82f6"), ("f", "#ff5fa2"), ("o", "#4b5563")):  # azul, rosa, cinza escuro
         regras.append(f'.stApp .st-key-gen_on_{letra} .stButton button[kind="tertiary"]::after {{ background:{cor}; }}')
     for estado in ("on", "off"):
         topo = f'.stApp .st-key-gen_{estado}_'
@@ -288,7 +292,10 @@ CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
 .stApp, .stApp *:not([data-testid="stIconMaterial"]) { font-family:'Space Grotesk',sans-serif; }
-.stApp { background:#0b1220; }
+.stApp { background:#0b1220; overflow-x:hidden; }
+[data-testid="stMain"], [data-testid="stAppViewContainer"] { overflow-x:hidden; }
+[data-testid="stHorizontalBlock"], [data-testid="stColumn"], .st-key-painel_perfil,
+.st-key-painel_perfil [data-testid="stMarkdown"], .st-key-painel_perfil [data-testid="stMarkdownContainer"] { overflow:visible !important; }
 header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .block-container { max-width:__LARGURA__; padding:8px 0; zoom:__ESCALA__; min-height:100vh; box-sizing:border-box;
                    display:flex; flex-direction:column; justify-content:center; }
@@ -353,11 +360,12 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .ft-genero { color:#e5e7eb; font-size:17px; text-align:center; line-height:22px; margin-top:4px; }
 .st-key-painel_perfil .ft-sub { margin-bottom:10px; }
 .st-key-painel_perfil [data-testid="stImage"] { width:100% !important; }
-.st-key-painel_perfil img { width:100% !important; height:300px; object-fit:cover; display:block;
+.st-key-painel_perfil img { width:calc(100% + (100vw - min(1280px, 96vw)) / 2) !important; max-width:none !important;
+    height:320px; object-fit:cover; display:block;
     /* degradê: a foto some suavemente no fundo escuro, em cima e embaixo */
     -webkit-mask-image:linear-gradient(to bottom, transparent 0%, #000 28%, #000 72%, transparent 100%);
             mask-image:linear-gradient(to bottom, transparent 0%, #000 28%, #000 72%, transparent 100%); }
-.ft-foto { height:300px; display:flex; align-items:center; justify-content:center;
+.ft-foto { height:320px; display:flex; align-items:center; justify-content:center;
            background:linear-gradient(160deg,#1b2433 0%,#0b1220 100%); }
 
 __ICONES__
@@ -404,10 +412,10 @@ def cabecalho(titulo, subtitulo=None):
         st.markdown(f"<div class='ft-sub'>{subtitulo}</div>", unsafe_allow_html=True)
 
 
-def campo(placeholder, chave, senha=False):
+def campo(placeholder, chave, senha=False, on_change=None):
     return st.text_input(placeholder, key=chave, placeholder=placeholder,
                          type="password" if senha else "default",
-                         label_visibility="collapsed")
+                         label_visibility="collapsed", on_change=on_change)
 
 
 # ----------------------------- Telas -----------------------------
@@ -576,6 +584,13 @@ def foto_halteres():
     st.markdown(FOTO_FALLBACK, unsafe_allow_html=True)
 
 
+def formatar_data():
+    """Ao sair do campo, 12102010 vira 12/10/2010 (reserva caso a máscara em tempo real não funcione)."""
+    d = re.sub(r"\D", "", st.session_state.get("perf_nasc", "") or "")[:8]
+    st.session_state.perf_nasc = (d[:2] + ("/" + d[2:4] if len(d) > 2 else "")
+                                  + ("/" + d[4:] if len(d) > 4 else ""))
+
+
 def escolher_genero(valor):
     st.session_state.perf_gen = valor
 
@@ -586,7 +601,7 @@ def tela_perfil():
         with st.container(key="card_perfil"):
             st.markdown("<div class='ft-titulo-card'>Registrar conta</div>", unsafe_allow_html=True)
             nome = campo("Nome completo", "perf_nome")
-            nasc = campo("00/00/0000", "perf_nasc")
+            nasc = campo("00/00/0000", "perf_nasc", on_change=formatar_data)
             peso = campo("Peso (kg)", "perf_peso")
             altura = campo("Altura (cm)", "perf_altura")
             st.markdown("<div class='ft-genero'>Gênero</div>", unsafe_allow_html=True)
