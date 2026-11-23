@@ -19,6 +19,9 @@ import resend
 import streamlit as st
 import streamlit.components.v1 as components
 
+# Modo de desenvolvimento
+MODO_DESENVOLVIMENTO = True
+
 # ----------------------------- Configurações -----------------------------
 DB_NAME = os.environ.get("FITTRACK_DB", "fittrack.db")
 MIN_SENHA = 8
