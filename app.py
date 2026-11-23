@@ -28,6 +28,7 @@ HEADER_ESCALA = 1.4  # tamanho do avatar e dos textos "FitTrack" / "Jornada Fitn
 PERFIL_ESCALA = 1.45  # tamanho do quadro da tela "Registrar conta" (1 = design)
 CARD_ESCALA = 1.4  # tamanho só do quadro de baixo (campos, botões, textos); 1 = design, tente 1.2 a 1.8
 TELA_ESCALA = 1.3  # tamanho das telas "Tudo pronto" e "Vamos personalizar seus treinos" (1 = design)
+MODO_DEV = True  # True: mostra o botão "🛠 DEV" para pular entre as telas. COLOQUE False ANTES DE LANÇAR O SITE.
 MODO_DEMO = False  # False: o código de recuperação é enviado por email (Resend). True: mostra o código na tela (só para testes).
 
 
@@ -381,8 +382,9 @@ CSS = """
 [data-testid="stHorizontalBlock"], [data-testid="stColumn"], .st-key-painel_perfil,
 .st-key-painel_perfil [data-testid="stMarkdown"], .st-key-painel_perfil [data-testid="stMarkdownContainer"] { overflow:visible !important; }
 header[data-testid="stHeader"], #MainMenu, footer { display:none; }
-.block-container { max-width:__LARGURA__; padding:8px 0; zoom:__ESCALA__; min-height:100vh; box-sizing:border-box;
-                   display:flex; flex-direction:column; justify-content:center; }
+.block-container { max-width:__LARGURA__; padding:8px 0; zoom:__ESCALA__; box-sizing:border-box; }
+/* centraliza o conteúdo na vertical, em qualquer altura de janela */
+.block-container > [data-testid="stVerticalBlock"] { min-height:calc(100vh - 16px); min-height:calc(100dvh - 16px); justify-content:center; }
 .block-container [data-testid="stVerticalBlock"] { gap:0; }
 .block-container [data-testid="stHorizontalBlock"] { gap:8px; }
 
@@ -910,6 +912,7 @@ def tela_resumo():
     if not p:
         ir("perfil")
         st.rerun()
+        return
     nasc = date.fromisoformat(p["nascimento"])
     hoje = date.today()
     idade = hoje.year - nasc.year - ((hoje.month, hoje.day) < (nasc.month, nasc.day))
@@ -965,8 +968,8 @@ TELAS_DEV = [("login", "1 · Login"), ("cadastro", "2 · Crie sua conta"), ("per
 
 
 def modo_dev():
-    """Só liga se você pedir: variável de ambiente FITTRACK_DEV=1 (no seu computador) ou DEV_MODE = true nos Secrets."""
-    if os.environ.get("FITTRACK_DEV") == "1":
+    """Liga com MODO_DEV = True (no topo do arquivo), ou FITTRACK_DEV=1 (no seu computador), ou DEV_MODE = true nos Secrets."""
+    if MODO_DEV or os.environ.get("FITTRACK_DEV") == "1":
         return True
     try:
         return bool(st.secrets.get("DEV_MODE", False))
