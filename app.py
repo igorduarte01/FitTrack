@@ -944,19 +944,18 @@ if MODO_DESENVOLVIMENTO:
 
     opcoes = {
         "Login": "login",
-        "Cadastro": "cadastro",
-        "Esquecer senha": "esqueceu",
-        "Informações pessoais": "perfil",
-        "Boas-vindas": "resumo",
-        "Personalização": "objetivos",
-        "Dashboard": "home"
+        "Crie sua conta": "cadastro",
+        "Vamos conhecer você!": "perfil",
+        "Tudo pronto!": "resumo",
+        "Vamos personalizar seus treinos!": "objetivos",
+        "Recuperar senha": "esqueceu",
+        "Boas-vindas": "home"
     }
 
-    tela_atual = st.session_state.tela
-
-    nomes = list(opcoes.keys())
     telas = list(opcoes.values())
+    nomes = list(opcoes.keys())
 
+    tela_atual = st.session_state.tela
     indice = telas.index(tela_atual) if tela_atual in telas else 0
 
     escolha = st.sidebar.selectbox(
@@ -968,7 +967,6 @@ if MODO_DESENVOLVIMENTO:
     if opcoes[escolha] != tela_atual:
         st.session_state.tela = opcoes[escolha]
         st.rerun()
-
 tela = st.session_state.tela
 if tela in ("home", "perfil", "resumo", "objetivos") and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
