@@ -358,6 +358,8 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 /* tela Registrar conta */
 .st-key-js_mask { height:0; overflow:hidden; margin:0; padding:0; }
 .block-container .st-key-card_perfil { zoom:__PERFIL_ESCALA__; }
+/* centraliza o quadro na vertical em relação à coluna da direita (avatar + foto) */
+[data-testid="stHorizontalBlock"]:has(.st-key-card_perfil) { align-items:center !important; }
 .ft-titulo-card { color:#fff; font-weight:700; font-size:26px; text-align:center; line-height:34px; margin:0; }
 .ft-genero { color:#e5e7eb; font-size:17px; text-align:center; line-height:22px; margin-top:4px; }
 .st-key-painel_perfil .ft-sub { margin-bottom:10px; }
