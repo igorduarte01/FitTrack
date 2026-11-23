@@ -1,3 +1,7 @@
+# ============================================================
+# FitTrack - Login e Criar conta (Streamlit + SQLite)
+# Rodar:  streamlit run app.py
+# ============================================================
 import base64
 import hashlib
 import html
@@ -349,7 +353,10 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .ft-genero { color:#e5e7eb; font-size:17px; text-align:center; line-height:22px; margin-top:4px; }
 .st-key-painel_perfil .ft-sub { margin-bottom:10px; }
 .st-key-painel_perfil [data-testid="stImage"] { width:100% !important; }
-.st-key-painel_perfil img { width:100% !important; height:300px; object-fit:cover; display:block; }
+.st-key-painel_perfil img { width:100% !important; height:300px; object-fit:cover; display:block;
+    /* degradê: a foto some suavemente no fundo escuro, em cima e embaixo */
+    -webkit-mask-image:linear-gradient(to bottom, transparent 0%, #000 28%, #000 72%, transparent 100%);
+            mask-image:linear-gradient(to bottom, transparent 0%, #000 28%, #000 72%, transparent 100%); }
 .ft-foto { height:300px; display:flex; align-items:center; justify-content:center;
            background:linear-gradient(160deg,#1b2433 0%,#0b1220 100%); }
 
