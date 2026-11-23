@@ -506,11 +506,17 @@ FOTO_FALLBACK = """
 
 
 def foto_halteres():
-    """Coloque a foto em assets/halteres.jpg (ou .jpeg/.png) ao lado do app.py."""
+    """Mostra a foto da pasta assets (ao lado do app.py).
+    Procura primeiro o nome da sua imagem; se não achar, usa halteres.* ou qualquer imagem da pasta."""
     pasta = Path(__file__).parent / "assets"
-    for nome in ("halteres.jpg", "halteres.jpeg", "halteres.png"):
-        if (pasta / nome).exists():
-            st.image(str(pasta / nome))
+    preferidos = ["Screenshot 2026-11-22 22.46.08.png", "halteres.jpg", "halteres.jpeg", "halteres.png"]
+    candidatos = [pasta / nome for nome in preferidos]
+    if pasta.exists():
+        candidatos += sorted(a for a in pasta.iterdir()
+                             if a.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"))
+    for caminho in candidatos:
+        if caminho.is_file():
+            st.image(str(caminho))
             return
     st.markdown(FOTO_FALLBACK, unsafe_allow_html=True)
 
