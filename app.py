@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import html
 import os
@@ -17,7 +18,7 @@ DB_NAME = os.environ.get("FITTRACK_DB", "fittrack.db")
 MIN_SENHA = 8
 ITERACOES = 200_000
 ESCALA = 1        # tamanho geral da página (1 = design)
-HEADER_ESCALA = 1.4  # tamanho do avatar e dos textos "Fit Track" / "Jornada Fitness" (1 = design)
+HEADER_ESCALA = 1.4  # tamanho do avatar e dos textos "FitTrack" / "Jornada Fitness" (1 = design)
 PERFIL_ESCALA = 1.5  # tamanho do quadro da tela "Registrar conta" (1 = design)
 CARD_ESCALA = 1.4  # tamanho só do quadro de baixo (campos, botões, textos); 1 = design, tente 1.2 a 1.8
 MODO_DEMO = True  # True: mostra o código de recuperação na tela. Em produção, use False e envie por email.
@@ -223,7 +224,7 @@ def salvar_perfil(email, nome, nascimento, peso, altura, genero):
 
 
 # =========================== INTERFACE (Streamlit) ===========================
-st.set_page_config(page_title="Fit Track", page_icon="💪", layout="centered")
+st.set_page_config(page_title="FitTrack", page_icon="💪", layout="centered")
 criar_tabelas()
 
 LARGURAS = {"login": 620, "esqueceu": 620, "home": 620, "cadastro": 580, "perfil": 620}
@@ -285,7 +286,8 @@ CSS = """
 .stApp, .stApp *:not([data-testid="stIconMaterial"]) { font-family:'Space Grotesk',sans-serif; }
 .stApp { background:#0b1220; }
 header[data-testid="stHeader"], #MainMenu, footer { display:none; }
-.block-container { max-width:__LARGURA__; padding:8px 0 0 0; zoom:__ESCALA__; }
+.block-container { max-width:__LARGURA__; padding:8px 0; zoom:__ESCALA__; min-height:100vh; box-sizing:border-box;
+                   display:flex; flex-direction:column; justify-content:center; }
 .block-container [data-testid="stVerticalBlock"] { gap:0; }
 .block-container [data-testid="stHorizontalBlock"] { gap:8px; }
 
@@ -403,7 +405,7 @@ def campo(placeholder, chave, senha=False):
 
 # ----------------------------- Telas -----------------------------
 def tela_login():
-    cabecalho("Fit Track", "Jornada Fitness")
+    cabecalho("FitTrack", "Jornada Fitness")
     with st.container(key="card_login"):
         email = campo("Email", "login_email")
         senha = campo("Senha", "login_senha", senha=True)
@@ -488,11 +490,11 @@ def tela_esqueceu():
 
 
 def tela_home():
-    cabecalho("Fit Track", "Jornada Fitness")
+    cabecalho("FitTrack", "Jornada Fitness")
     with st.container(key="card_home"):
         nome = obter_nome(st.session_state.usuario or "")
         quem = html.escape(nome or st.session_state.usuario or "")
-        st.markdown(f"<div class='ft-bemvindo'>Bem-vindo(a) ao Fit Track!<br>{quem}</div>",
+        st.markdown(f"<div class='ft-bemvindo'>Bem-vindo(a) ao FitTrack!<br>{quem}</div>",
                     unsafe_allow_html=True)
         _, c2, _ = st.columns(COLUNAS_BOTAO)
         if c2.button("Sair", type="primary", key="btn_sair"):
@@ -550,17 +552,19 @@ FOTO_FALLBACK = """
 
 
 def foto_halteres():
-    """Mostra a foto da pasta assets (ao lado do app.py).
-    Procura assets/halteres.png (ou .jpg); se não achar, usa qualquer imagem da pasta."""
+    """Mostra a foto da pasta assets, ao lado do app.py: assets/halteres.png (ou .jpg).
+    Se não houver nenhuma imagem na pasta, mostra um halter desenhado no lugar."""
     pasta = Path(__file__).parent / "assets"
-    preferidos = ["halteres.png", "halteres.jpg", "halteres.jpeg"]
-    candidatos = [pasta / nome for nome in preferidos]
-    if pasta.exists():
+    candidatos = [pasta / n for n in ("halteres.png", "halteres.jpg", "halteres.jpeg")]
+    if pasta.is_dir():
         candidatos += sorted(a for a in pasta.iterdir()
                              if a.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"))
     for caminho in candidatos:
         if caminho.is_file():
-            st.image(str(caminho))
+            tipo = {".png": "png", ".webp": "webp"}.get(caminho.suffix.lower(), "jpeg")
+            dados = base64.b64encode(caminho.read_bytes()).decode()
+            st.markdown(f'<img class="ft-foto-img" alt="Halteres" src="data:image/{tipo};base64,{dados}">',
+                        unsafe_allow_html=True)
             return
     st.markdown(FOTO_FALLBACK, unsafe_allow_html=True)
 
@@ -599,7 +603,7 @@ def tela_perfil():
             mostrar_msg()
     with dir_:
         with st.container(key="painel_perfil"):
-            cabecalho("Fit Track", "Jornada Fitness")
+            cabecalho("FitTrack", "Jornada Fitness")
             foto_halteres()
     with st.container(key="js_mask"):
         try:
