@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ----------------------------- Configurações -----------------------------
 DB_NAME = os.environ.get("FITTRACK_DB", "fittrack.db")
@@ -152,7 +153,7 @@ def redefinir_senha(email, codigo, nova, confirmar):
         con.close()
 
 
-GENEROS = ["Masculino", "Feminino", "Outro"]
+GENEROS = ["Masculino", "Feminino", "Prefiro não dizer"]
 
 
 def _numero(texto):
@@ -184,7 +185,10 @@ def salvar_perfil(email, nome, nascimento, peso, altura, genero):
     if len(nome) < 3 or len(nome) > 100 or len(nome.split()) < 2:
         return False, "Informe seu nome completo."
     try:
-        nasc = datetime.strptime((nascimento or "").strip(), "%d/%m/%Y").date()
+        bruto = (nascimento or "").strip()
+        if re.fullmatch(r"\d{8}", bruto):
+            bruto = f"{bruto[:2]}/{bruto[2:4]}/{bruto[4:]}"
+        nasc = datetime.strptime(bruto, "%d/%m/%Y").date()
     except ValueError:
         return False, "Data de nascimento inválida. Use o formato dd/mm/aaaa."
     hoje = date.today()
@@ -263,7 +267,8 @@ def css_icones():
     regras.append(f'{base} p {{ font-size:40px !important; font-weight:700 !important; line-height:1 !important; }}')
     regras.append(f'{base}::after {{ content:""; width:22px; height:22px; box-sizing:border-box; border-radius:50%; '
                   'background:#d9d9d9; border:3px solid #000; flex:none; }')
-    regras.append('.stApp [class*="st-key-gen_on_"] .stButton button[kind="tertiary"]::after { background:#2563eb; }')
+    for letra, cor in (("m", "#3b82f6"), ("f", "#ff5fa2"), ("o", "#9ca3af")):  # azul, rosa, cinza
+        regras.append(f'.stApp .st-key-gen_on_{letra} .stButton button[kind="tertiary"]::after {{ background:{cor}; }}')
     for estado in ("on", "off"):
         topo = f'.stApp .st-key-gen_{estado}_'
         regras.append(f'{topo}m .stButton button[kind="tertiary"] p {{ color:#7b9cff !important; }}')
@@ -336,6 +341,7 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .st-key-btn_esq button { justify-content:flex-end !important; }
 
 /* tela Registrar conta */
+.st-key-js_mask { height:0; overflow:hidden; margin:0; padding:0; }
 .block-container .st-key-card_perfil { zoom:__PERFIL_ESCALA__; }
 .ft-titulo-card { color:#fff; font-weight:700; font-size:26px; text-align:center; line-height:34px; margin:0; }
 .ft-genero { color:#e5e7eb; font-size:17px; text-align:center; line-height:22px; margin-top:4px; }
@@ -495,6 +501,44 @@ def tela_home():
             st.rerun()
 
 
+MASCARA_DATA_JS = """
+<script>
+(function () {
+  var doc = window.parent.document;
+  var setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, "value").set;
+
+  function formatar(d, apagando) {
+    var v = d.slice(0, 2);
+    if (d.length > 2 || (d.length === 2 && !apagando)) v += "/";
+    if (d.length > 2) v += d.slice(2, 4);
+    if (d.length > 4 || (d.length === 4 && !apagando)) v += "/";
+    if (d.length > 4) v += d.slice(4, 8);
+    return v;
+  }
+
+  function ligar() {
+    var el = doc.querySelector(".st-key-perf_nasc input");
+    if (!el || el.dataset.mascara) return;
+    el.dataset.mascara = "1";
+    el.setAttribute("inputmode", "numeric");
+    el.setAttribute("maxlength", "10");
+    el.addEventListener("input", function (e) {
+      var apagando = !!(e.inputType && e.inputType.indexOf("delete") === 0);
+      var novo = formatar(el.value.replace(/\\D/g, "").slice(0, 8), apagando);
+      if (novo !== el.value) {
+        setter.call(el, novo);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+  }
+
+  ligar();
+  setInterval(ligar, 300);
+})();
+</script>
+"""
+
+
 FOTO_FALLBACK = """
 <div class="ft-foto">
 <svg width="260" height="120" viewBox="0 0 260 120" xmlns="http://www.w3.org/2000/svg">
@@ -507,9 +551,9 @@ FOTO_FALLBACK = """
 
 def foto_halteres():
     """Mostra a foto da pasta assets (ao lado do app.py).
-    Procura primeiro o nome da sua imagem; se não achar, usa halteres.* ou qualquer imagem da pasta."""
+    Procura assets/halteres.png (ou .jpg); se não achar, usa qualquer imagem da pasta."""
     pasta = Path(__file__).parent / "assets"
-    preferidos = ["Screenshot 2026-11-22 22.46.08.png", "halteres.jpg", "halteres.jpeg", "halteres.png"]
+    preferidos = ["halteres.png", "halteres.jpg", "halteres.jpeg"]
     candidatos = [pasta / nome for nome in preferidos]
     if pasta.exists():
         candidatos += sorted(a for a in pasta.iterdir()
@@ -539,7 +583,7 @@ def tela_perfil():
             colunas = st.columns(3)
             for col, valor, letra, rotulo in ((colunas[0], "Masculino", "m", "♂"),
                                               (colunas[1], "Feminino", "f", "♀"),
-                                              (colunas[2], "Outro", "o", "Outro")):
+                                              (colunas[2], "Prefiro não dizer", "o", "Prefiro não dizer")):
                 estado = "on" if genero == valor else "off"
                 col.button(rotulo, type="tertiary", key=f"gen_{estado}_{letra}",
                            on_click=escolher_genero, args=(valor,))
@@ -557,6 +601,11 @@ def tela_perfil():
         with st.container(key="painel_perfil"):
             cabecalho("Fit Track", "Jornada Fitness")
             foto_halteres()
+    with st.container(key="js_mask"):
+        try:
+            components.html(MASCARA_DATA_JS, height=0)
+        except Exception:
+            pass  # sem a máscara o campo continua funcionando (aceita 01011990 ou 01/01/1990)
 
 
 TELAS = {"login": tela_login, "cadastro": tela_cadastro, "esqueceu": tela_esqueceu,
