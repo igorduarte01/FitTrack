@@ -937,6 +937,38 @@ def tela_objetivos():
 TELAS = {"login": tela_login, "cadastro": tela_cadastro, "esqueceu": tela_esqueceu,
          "perfil": tela_perfil, "resumo": tela_resumo, "objetivos": tela_objetivos, "home": tela_home}
 
+# ================= MODO DESENVOLVEDOR =================
+if MODO_DESENVOLVIMENTO:
+    st.sidebar.title("FitTrack Dev")
+    st.sidebar.caption("Navegação de testes")
+
+    opcoes = {
+        "Login": "login",
+        "Cadastro": "cadastro",
+        "Esquecer senha": "esqueceu",
+        "Informações pessoais": "perfil",
+        "Boas-vindas": "resumo",
+        "Personalização": "objetivos",
+        "Dashboard": "home"
+    }
+
+    tela_atual = st.session_state.tela
+
+    nomes = list(opcoes.keys())
+    telas = list(opcoes.values())
+
+    indice = telas.index(tela_atual) if tela_atual in telas else 0
+
+    escolha = st.sidebar.selectbox(
+        "Ir diretamente para:",
+        nomes,
+        index=indice
+    )
+
+    if opcoes[escolha] != tela_atual:
+        st.session_state.tela = opcoes[escolha]
+        st.rerun()
+
 tela = st.session_state.tela
 if tela in ("home", "perfil", "resumo", "objetivos") and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
