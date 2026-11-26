@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import sqlite3
+import struct
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -27,6 +28,7 @@ ESCALA = 1        # tamanho geral da página (1 = design)
 HEADER_ESCALA = 1.4  # tamanho do avatar e dos textos "FitTrack" / "Jornada Fitness" (1 = design)
 PERFIL_ESCALA = 1.45  # tamanho do quadro da tela "Registrar conta" (1 = design)
 CARD_ESCALA = 1.4  # tamanho só do quadro de baixo (campos, botões, textos); 1 = design, tente 1.2 a 1.8
+DASH_ESCALA = 1.5  # tamanho do dashboard (1 = design)
 TELA_ESCALA = 1.3  # tamanho das telas "Tudo pronto" e "Vamos personalizar seus treinos" (1 = design)
 MODO_DEV = True  # True: mostra o botão "🛠 DEV" para pular entre as telas. COLOQUE False ANTES DE LANÇAR O SITE.
 MODO_DEMO = False  # False: o código de recuperação é enviado por email (Resend). True: mostra o código na tela (só para testes).
@@ -68,6 +70,20 @@ def criar_tabelas():
             usuario_id INTEGER PRIMARY KEY,
             objetivo TEXT NOT NULL,
             atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id))""")
+        con.execute("""CREATE TABLE IF NOT EXISTS treinos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            data TEXT NOT NULL,
+            grupo TEXT NOT NULL,
+            nome TEXT NOT NULL,
+            minutos INTEGER NOT NULL,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id))""")
+        con.execute("""CREATE TABLE IF NOT EXISTS pesos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            data TEXT NOT NULL,
+            peso_kg REAL NOT NULL,
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id))""")
         con.execute("""CREATE TABLE IF NOT EXISTS niveis (
             usuario_id INTEGER PRIMARY KEY,
@@ -242,9 +258,11 @@ def salvar_perfil(email, nome, nascimento, peso, altura, genero):
                              peso_kg=excluded.peso_kg, altura_cm=excluded.altura_cm,
                              genero=excluded.genero, atualizado_em=CURRENT_TIMESTAMP""",
                         (u["id"], nome, nasc.isoformat(), peso_kg, altura_cm, genero))
-        return True, "Perfil criado com sucesso!"
+        resultado = (True, "Perfil criado com sucesso!")
     finally:
         con.close()
+    registrar_peso(email, peso_kg)  # primeiro ponto do gráfico "Evolução do peso"
+    return resultado
 
 
 OBJETIVOS = [("massa", "Ganhar massa muscular"), ("gordura", "Perder gordura"),
@@ -328,6 +346,103 @@ def tem_nivel(email):
     return obter_nivel(email) is not None
 
 
+GRUPOS_TREINO = {"peito": "Treino de peito", "costas": "Treino de costas", "bracos": "Treino de braços",
+                 "ombros": "Treino de ombros", "pernas": "Treino de pernas"}
+
+
+def _usuario_id(con, email):
+    r = con.execute("SELECT id FROM usuarios WHERE email=?", (email.strip().lower(),)).fetchone()
+    return r["id"] if r else None
+
+
+def registrar_treino(email, grupo, minutos, data=None):
+    """Registra um treino feito: alimenta 'Treinos realizados', 'Dias ativos' e 'Atividade recente' do dashboard."""
+    if grupo not in GRUPOS_TREINO or not 1 <= int(minutos) <= 600:
+        return False, "Treino inválido."
+    con = conectar()
+    try:
+        uid = _usuario_id(con, email)
+        if uid is None:
+            return False, "Usuário não encontrado."
+        with con:
+            con.execute("INSERT INTO treinos (usuario_id, data, grupo, nome, minutos) VALUES (?,?,?,?,?)",
+                        (uid, (data or date.today()).isoformat(), grupo, GRUPOS_TREINO[grupo], int(minutos)))
+        return True, "Treino registrado!"
+    finally:
+        con.close()
+
+
+def resumo_treinos(email):
+    """(treinos realizados no total, dias ativos nos últimos 30 dias)."""
+    con = conectar()
+    try:
+        uid = _usuario_id(con, email)
+        if uid is None:
+            return 0, 0
+        total = con.execute("SELECT COUNT(*) FROM treinos WHERE usuario_id=?", (uid,)).fetchone()[0]
+        desde = (date.today() - timedelta(days=29)).isoformat()
+        dias = con.execute("SELECT COUNT(DISTINCT data) FROM treinos WHERE usuario_id=? AND data>=?",
+                           (uid, desde)).fetchone()[0]
+        return total, dias
+    finally:
+        con.close()
+
+
+def atividades_recentes(email, limite=3):
+    con = conectar()
+    try:
+        uid = _usuario_id(con, email)
+        if uid is None:
+            return []
+        linhas = con.execute("""SELECT data, grupo, nome, minutos FROM treinos WHERE usuario_id=?
+                                ORDER BY data DESC, id DESC LIMIT ?""", (uid, limite)).fetchall()
+        return [dict(data=date.fromisoformat(r["data"]), grupo=r["grupo"], nome=r["nome"], minutos=r["minutos"])
+                for r in linhas]
+    finally:
+        con.close()
+
+
+def registrar_peso(email, kg, data=None):
+    """Um peso por dia: registrar de novo no mesmo dia substitui o anterior."""
+    dia = (data or date.today()).isoformat()
+    con = conectar()
+    try:
+        uid = _usuario_id(con, email)
+        if uid is None:
+            return False
+        with con:
+            con.execute("DELETE FROM pesos WHERE usuario_id=? AND data=?", (uid, dia))
+            con.execute("INSERT INTO pesos (usuario_id, data, peso_kg) VALUES (?,?,?)", (uid, dia, float(kg)))
+        return True
+    finally:
+        con.close()
+
+
+def historico_peso(email, dias=30):
+    con = conectar()
+    try:
+        uid = _usuario_id(con, email)
+        if uid is None:
+            return []
+        desde = (date.today() - timedelta(days=dias - 1)).isoformat()
+        linhas = con.execute("SELECT data, peso_kg FROM pesos WHERE usuario_id=? AND data>=? ORDER BY data",
+                             (uid, desde)).fetchall()
+        return [(date.fromisoformat(r["data"]), r["peso_kg"]) for r in linhas]
+    finally:
+        con.close()
+
+
+def peso_atual(email):
+    con = conectar()
+    try:
+        uid = _usuario_id(con, email)
+        r = con.execute("SELECT peso_kg FROM pesos WHERE usuario_id=? ORDER BY data DESC, id DESC LIMIT 1",
+                        (uid,)).fetchone() if uid is not None else None
+        return r["peso_kg"] if r else None
+    finally:
+        con.close()
+
+
 EMAIL_DEV = "dev@fittrack.local"
 
 
@@ -353,11 +468,95 @@ def garantir_usuario_dev():
     return EMAIL_DEV
 
 
+def zerar_dados_dev():
+    con = conectar()
+    try:
+        uid = _usuario_id(con, EMAIL_DEV)
+        if uid is not None:
+            with con:
+                con.execute("DELETE FROM treinos WHERE usuario_id=?", (uid,))
+                con.execute("DELETE FROM pesos WHERE usuario_id=?", (uid,))
+    finally:
+        con.close()
+    if uid is not None:
+        registrar_peso(EMAIL_DEV, 58)
+
+
+def gerar_dados_exemplo_dev():
+    """Modo desenvolvedor: cria treinos e pesos dos últimos 30 dias para o dashboard aparecer preenchido."""
+    garantir_usuario_dev()
+    zerar_dados_dev()
+    hoje = date.today()
+    treinos = [(0, "peito", 45), (1, "costas", 50), (3, "bracos", 35), (4, "pernas", 55), (6, "ombros", 40),
+               (8, "peito", 45), (11, "costas", 50), (13, "bracos", 35), (16, "pernas", 55), (19, "ombros", 40),
+               (23, "peito", 45), (27, "costas", 50)]
+    for atras, grupo, minutos in treinos:
+        registrar_treino(EMAIL_DEV, grupo, minutos, hoje - timedelta(days=atras))
+    for atras, kg in ((29, 56.4), (24, 56.9), (19, 56.7), (14, 57.2), (9, 57.0), (4, 57.4), (0, 57.5)):
+        registrar_peso(EMAIL_DEV, kg, hoje - timedelta(days=atras))
+
+
 # =========================== INTERFACE (Streamlit) ===========================
 st.set_page_config(page_title="FitTrack", page_icon="💪", layout="centered")
 criar_tabelas()
 
 LARGURAS = {"login": 620, "esqueceu": 620, "home": 620, "cadastro": 580, "perfil": 620}
+
+# ----------------------------- ícones (PNG recortados das suas interfaces) -----------------------------
+PASTA_ICONES = Path(__file__).parent / "assets" / "icones"
+AMPLIACAO_ICONE = 2  # os PNGs foram salvos 2x maiores que no design (ficam nítidos com o zoom)
+_CACHE_ICONE = {}
+
+
+def _icone(nome):
+    """(data URI, largura, altura em px do design) ou None se o arquivo não existir."""
+    if nome not in _CACHE_ICONE:
+        arq = PASTA_ICONES / f"{nome}.png"
+        info = None
+        if nome and arq.is_file():
+            dados = arq.read_bytes()
+            largura, altura = struct.unpack(">II", dados[16:24])
+            info = ("data:image/png;base64," + base64.b64encode(dados).decode(),
+                    largura / AMPLIACAO_ICONE, altura / AMPLIACAO_ICONE)
+        _CACHE_ICONE[nome] = info
+    return _CACHE_ICONE[nome]
+
+
+def icone_dim(nome, padrao=(24, 24)):
+    i = _icone(nome)
+    return (i[1], i[2]) if i else padrao
+
+
+def img_icone(nome, svg_reserva="", k=1.0):
+    """<img> do ícone recortado do design (altura = altura do design x k). Sem o arquivo, usa o desenho de reserva."""
+    i = _icone(nome)
+    if not i:
+        return svg_reserva
+    return f'<img class="ic" alt="" src="{i[0]}" style="height:{i[2] * k:.1f}px">'
+
+
+_VARS_ICONE = {}
+
+
+def ref_icone(nome, svg_reserva=""):
+    """Como url_icone, mas guarda a imagem uma única vez numa variável CSS (--ic-nome) e devolve var(--ic-nome)."""
+    _VARS_ICONE[nome or "vazio"] = url_icone(nome, svg_reserva)
+    return f"var(--ic-{nome or 'vazio'})"
+
+
+def css_vars_icones():
+    return ":root { " + " ".join(f"--ic-{n}:{u};" for n, u in _VARS_ICONE.items()) + " }"
+
+
+def url_icone(nome, svg_reserva=""):
+    """url(...) para background-image: o PNG recortado, ou o desenho de reserva."""
+    i = _icone(nome)
+    if i:
+        return f'url("{i[0]}")'
+    if svg_reserva:
+        return 'url("data:image/svg+xml,' + quote(svg_reserva) + '")'
+    return "none"
+
 
 SVG_EMAIL = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#d1d5db' "
              "stroke-width='1.8' stroke-linejoin='round'><rect x='2' y='5' width='20' height='14' rx='2'/>"
@@ -377,21 +576,36 @@ SVG_ALTURA = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill=
               "stroke-linecap='round' stroke-linejoin='round'><path d='M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4'/></svg>")
 
 
-def css_icones():
-    """Ícones de email e cadeado dentro dos campos (como no design)."""
-    grupos = ((SVG_EMAIL, ["login_email", "cad_email", "rec_email"]),
-              (SVG_LOCK, ["login_senha", "cad_senha", "cad_conf", "rec_cod", "rec_nova", "rec_conf"]),
-              (SVG_PESSOA, ["perf_nome"]), (SVG_CALENDARIO, ["perf_nasc"]),
-              (SVG_PESO, ["perf_peso"]), (SVG_ALTURA, ["perf_altura"]))
+SVG_OLHO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#d1d5db' stroke-width='1.8' "
+            "stroke-linecap='round' stroke-linejoin='round'><path d='M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z'/>"
+            "<circle cx='12' cy='12' r='3'/></svg>")
+
+
+def _regras_campo(chave, nome, svg, fator, esq=9):
+    """Ícone dentro do campo (à esquerda) e espaço para o texto não ficar em cima dele."""
+    w, h = icone_dim(nome, (22, 22))
+    return [f'.st-key-{chave} [data-testid="stTextInputRootElement"] {{ background-image:{ref_icone(nome, svg)} !important; '
+            f'background-repeat:no-repeat; background-position:{esq}px center; background-size:auto {h * fator:.1f}px; }}',
+            f'.st-key-{chave} input {{ padding-left:{esq + w * fator + 10:.0f}px !important; }}']
+
+
+def _regras_olho(escopo, nome, fator):
+    """Troca o ícone do olho do campo de senha pelo do design (só se o PNG existir)."""
+    i = _icone(nome)
+    if not i:
+        return []
+    w, h = icone_dim(nome)
+    alvo = f'{escopo} [data-testid="stTextInputRootElement"]'
+    return [f'{alvo} button {{ background-image:{ref_icone(nome)} !important; background-repeat:no-repeat; '
+            f'background-position:center; background-size:auto {h * fator:.1f}px; min-width:{w * fator + 16:.0f}px; }}',
+            f'{alvo} button * {{ opacity:0 !important; }}',
+            f'{alvo}:has(input[type="text"]) button {{ background-image:{ref_icone("olho_aberto", SVG_OLHO)} !important; '
+            f'background-size:auto {h * fator:.1f}px; }}']
+
+
+def _regras_genero():
+    """Botões de gênero: ícones do design (♂ ♀ pessoa) e a bolinha ao lado, que muda de cor ao escolher."""
     regras = []
-    for svg, chaves in grupos:
-        url = 'url("data:image/svg+xml,' + quote(svg) + '")'
-        for k in chaves:
-            regras.append(f'.st-key-{k} [data-testid="stTextInputRootElement"] {{ background-image:{url} !important; '
-                          f'background-repeat:no-repeat; background-position:10px center; background-size:22px 22px; }}')
-            regras.append(f'.st-key-{k} input {{ padding-left:44px !important; }}')
-    # botões de gênero: ♂ azul, ♀ rosa, pessoa cinza, cada um com o círculo ao lado
-    url_pessoa = 'url("data:image/svg+xml,' + quote(SVG_PESSOA) + '")'
     base = '.stApp [class*="st-key-gen_"] .stButton button[kind="tertiary"]'
     regras.append('[class*="st-key-gen_"] { display:flex; justify-content:center; align-items:center; width:100%; }')
     regras.append('[data-testid="stColumn"]:has([class*="st-key-gen_"]) { display:flex; justify-content:center; }')
@@ -409,12 +623,40 @@ def css_icones():
         topo = f'.stApp .st-key-gen_{estado}_'
         regras.append(f'{topo}m .stButton button[kind="tertiary"] p {{ color:#7b9cff !important; }}')
         regras.append(f'{topo}f .stButton button[kind="tertiary"] p {{ color:#ff5fa2 !important; }}')
-        regras.append(f'{topo}o .stButton button[kind="tertiary"] p {{ font-size:0 !important; display:flex; '
-                      'flex-direction:column; align-items:center; gap:3px; }')
+        for letra, nome, svg in (("m", "macho", ""), ("f", "femea", ""), ("o", "outro", SVG_PESSOA)):
+            if not svg and not _icone(nome):
+                continue  # sem o PNG, ♂ e ♀ continuam como letras coloridas
+            w, h = icone_dim(nome, (34, 34))
+            p = f'{topo}{letra} .stButton button[kind="tertiary"] p'
+            regras.append(f'{p} {{ font-size:0 !important; display:flex; flex-direction:column; align-items:center; gap:3px; }}')
+            regras.append(f'{p}::before {{ content:""; display:inline-block; width:{w * 0.95:.1f}px; height:{h * 0.95:.1f}px; '
+                          f'background:{ref_icone(nome, svg)} center/contain no-repeat; }}')
         regras.append(f'{topo}o .stButton button[kind="tertiary"] p::after {{ content:"Outro"; font-size:11px; '
                       'font-weight:400; color:#e5e7eb; line-height:1; }')
-        regras.append(f'{topo}o .stButton button[kind="tertiary"] p::before {{ content:""; display:inline-block; '
-                      f'width:34px; height:34px; background:{url_pessoa} center/contain no-repeat; }}')
+    return regras
+
+
+def css_icones(tela):
+    """Só gera os ícones da tela que está aberta (assim cada página carrega só o que usa)."""
+    regras = []
+    if tela in ("login", "cadastro"):
+        f = 0.88
+        for k in ("login_email", "cad_email"):
+            regras += _regras_campo(k, "mail", SVG_EMAIL, f)
+        for k in ("login_senha", "cad_senha", "cad_conf"):
+            regras += _regras_campo(k, "lock", SVG_LOCK, f)
+        regras += _regras_olho('[class*="st-key-card_"]', "eye", f)
+    elif tela == "esqueceu":
+        regras += _regras_campo("rec_email", "mail_escuro", SVG_EMAIL, 1.0)
+        for k in ("rec_cod", "rec_nova", "rec_conf"):
+            regras += _regras_campo(k, "lock_escuro", SVG_LOCK, 1.0)
+        regras += _regras_olho(".st-key-painel_rec", "eye_escuro", 1.0)
+    elif tela == "perfil":
+        regras += _regras_campo("perf_nome", "pessoa_campo", SVG_PESSOA, 0.93)
+        regras += _regras_campo("perf_nasc", "calendario_campo", SVG_CALENDARIO, 0.93)
+        regras += _regras_campo("perf_peso", "peso_campo", SVG_PESO, 0.93)
+        regras += _regras_campo("perf_altura", "altura_campo", SVG_ALTURA, 0.93)
+        regras += _regras_genero()
     return "\n".join(regras)
 
 
@@ -434,7 +676,7 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .block-container [data-testid="stHorizontalBlock"] { gap:8px; }
 
 /* textos */
-.ft-avatar { display:flex; justify-content:center; height:76px; margin-bottom:14px; zoom:__HEADER_ESCALA__; }
+.ft-avatar { display:flex; justify-content:center; margin-bottom:14px; zoom:__HEADER_ESCALA__; }
 .ft-avatar svg { display:block; height:76px; width:76px; }
 .ft-logo { display:flex; justify-content:center; align-items:center; gap:8px; font-size:26px; line-height:30px; margin:0 0 6px; zoom:__HEADER_ESCALA__; }
 .ft-logo svg { height:22px; width:auto; }
@@ -508,6 +750,9 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .ft-foto { height:370px; margin-top:-30px; display:flex; align-items:center; justify-content:center;
            background:linear-gradient(160deg,#1b2433 0%,#0b1220 100%); }
 
+/* ícones recortados do design */
+.ic { display:inline-block; vertical-align:middle; flex:none; max-width:none; }
+
 /* links com parte em azul: "Não tem uma conta? Criar conta" */
 .stButton button[kind="tertiary"] p strong, .stButton button[data-testid="stBaseButton-tertiary"] p strong { color:#2563eb !important; font-weight:700 !important; }
 
@@ -565,7 +810,7 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .stApp [class*="st-key-obj_"] .stButton button [data-testid="stMarkdownContainer"] { flex:1; width:auto; text-align:left; }
 
 /* ---------- recuperar senha (2 etapas) ---------- */
-.block-container .st-key-zoom_rec, .block-container .st-key-zoom_niv, .block-container .st-key-zoom_dash { zoom:__TELA_ESCALA__; width:100%; box-sizing:border-box; }
+.block-container .st-key-zoom_rec, .block-container .st-key-zoom_niv { zoom:__TELA_ESCALA__; width:100%; box-sizing:border-box; }
 .block-container .st-key-zoom_rec { padding:0 8px; gap:0; }
 .rc-logo { margin:2px 0 14px; } .rc-logo .ft-logo-p { justify-content:center; font-size:24px; }
 .block-container .st-key-painel_rec { background:#131d33; border:1px solid #2a3a58; border-radius:28px; padding:16px 20px 14px; gap:10px; }
@@ -597,66 +842,6 @@ header[data-testid="stHeader"], #MainMenu, footer { display:none; }
 .stApp [class*="st-key-niv_"] .stButton button [data-testid="stMarkdownContainer"] { flex:1; width:auto; text-align:left; }
 .stApp [class*="st-key-niv_"] .stButton button p { color:#fff; font-size:19px; font-weight:700; line-height:1.2; text-align:left; }
 
-/* ---------- dashboard ---------- */
-.block-container > [data-testid="stVerticalBlock"]:has(.st-key-zoom_dash) { justify-content:flex-start; }
-.block-container .st-key-zoom_dash { padding:8px 0; gap:0; }
-.st-key-zoom_dash [data-testid="stHorizontalBlock"] { gap:16px; align-items:flex-start !important; flex-wrap:nowrap !important; }
-.st-key-zoom_dash [data-testid="stColumn"] { min-width:0 !important; }
-.st-key-zoom_dash [data-testid="stColumn"]:has(.st-key-menu_lateral) { position:sticky; top:8px; align-self:flex-start; }
-.block-container .st-key-menu_lateral { position:relative; height:433px; background:#15223f; border-radius:16px; padding:16px 12px; gap:6px; box-sizing:border-box; }
-.dm-hr { height:1px; background:#4a5568; margin:14px 6px 16px; }
-.dm-label { color:#3b82f6; font-size:12px; font-weight:700; letter-spacing:.4px; margin:0 8px 6px; }
-[class*="st-key-mn_"], [class*="st-key-mn_"] .stButton { width:100% !important; }
-.stApp [class*="st-key-mn_"] .stButton button { width:100% !important; height:46px; min-height:46px; background:transparent; border:none; border-radius:12px;
-    justify-content:flex-start; padding:0 12px; box-shadow:none; }
-.stApp [class*="st-key-mn_"] .stButton button [data-testid="stMarkdownContainer"] { flex:1; width:auto; text-align:left; }
-.stApp [class*="st-key-mn_"] .stButton button p { color:#fff; font-size:19px; font-weight:500; text-align:left; line-height:1.1; }
-.stApp [class*="st-key-mn_"] .stButton button::before { content:""; width:24px; height:24px; margin-right:14px; flex:none;
-    background-repeat:no-repeat; background-position:center; background-size:contain; }
-.stApp .st-key-mn_sair .stButton button p { font-size:16px; font-weight:400; }
-.stApp .st-key-mn_sair .stButton button::before { width:22px; height:22px; margin-right:12px; }
-.st-key-menu_sair { position:absolute !important; left:12px; right:12px; bottom:14px; gap:6px; }
-.dm-hr-sair { height:1px; background:#4a5568; margin:0 6px 4px; }
-
-.db-data { color:#fff; font-size:12px; font-weight:700; letter-spacing:.3px; margin:8px 0 6px 12px; }
-.db-ola { color:#fff; font-size:20px; font-weight:700; line-height:26px; margin:0 0 20px 12px; }
-.db-evoluir { margin:0 0 6px 12px; } .db-evoluir b { display:block; color:#fff; font-size:20px; line-height:26px; }
-.db-evoluir span { display:block; color:#fff; font-size:15px; line-height:19px; }
-.db-obj { background:#3b5b9a; border-radius:14px; padding:12px 14px 14px 26px; margin:8px 0 16px; }
-.db-obj-l { color:#fff; font-size:11px; font-weight:700; letter-spacing:.3px; margin-left:-12px; }
-.db-obj-c { display:flex; align-items:center; gap:12px; margin-top:4px; margin-left:-12px; }
-.db-obj-c svg { width:42px; height:42px; flex:none; }
-.db-obj-t { color:#fff; font-size:19px; font-weight:700; line-height:24px; }
-.db-obj-n { color:#e5e7eb; font-size:12px; }
-.db-h { color:#fff; font-size:18px; font-weight:700; line-height:24px; margin:6px 0 8px 12px; }
-.db-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
-.db-stat { background:#18294a; border-radius:12px; padding:10px 14px 12px; }
-.db-stat svg { width:22px; height:16px; display:block; }
-.db-stat b { display:block; color:#fff; font-size:28px; font-weight:500; line-height:32px; }
-.db-stat span { display:block; color:#e5e7eb; font-size:12px; }
-.block-container .st-key-db_rotina { background:#18294a; border-radius:14px; padding:14px 16px 14px; gap:10px; margin-bottom:6px; }
-.db-r-t { display:flex; justify-content:space-between; align-items:center; color:#fff; font-size:17px; font-weight:700; line-height:22px; }
-.db-r-t svg { width:18px; height:18px; }
-.db-r-s { color:#e5e7eb; font-size:13px; margin:22px 0 14px; }
-.db-semana { display:flex; justify-content:space-between; padding:0 6px; }
-.db-dia { display:flex; flex-direction:column; align-items:center; gap:4px; color:#fff; font-size:13px; }
-.db-dia svg { width:20px; height:20px; }
-.db-colchete { height:8px; border:1px solid #6b7a99; border-top:none; margin:4px 22px 6px; }
-.stApp .st-key-btn_db_montar .stButton button { height:34px; min-height:34px; border-radius:6px; }
-.stApp .st-key-btn_db_montar .stButton button p { font-size:14px !important; }
-.db-card { background:#18294a; border-radius:14px; padding:12px 16px 12px; margin-bottom:6px; }
-.db-card-topo { display:flex; justify-content:space-between; align-items:baseline; }
-.db-card-topo b { color:#fff; font-size:16px; } .db-card-topo i { color:#3b82f6; font-size:9px; font-style:normal; font-weight:700; letter-spacing:.3px; }
-.db-peso { color:#fff; font-size:28px; font-weight:700; line-height:34px; margin-top:10px; }
-.db-peso-s { color:#e5e7eb; font-size:10px; }
-.db-grafico { display:flex; justify-content:flex-end; margin:-6px 20px 4px 0; } .db-grafico svg { width:190px; height:54px; }
-.db-ativ { padding:8px 14px; }
-.db-ati { display:flex; align-items:center; gap:10px; padding:5px 0; }
-.db-ati > svg:first-child { width:28px; height:28px; flex:none; } .db-ati > svg:last-child { width:20px; height:20px; flex:none; }
-.db-ati > div { flex:1; } .db-ati b { display:block; color:#fff; font-size:14px; line-height:17px; } .db-ati span { display:block; color:#e5e7eb; font-size:12px; }
-.db-ph { background:#18294a; border-radius:14px; padding:26px 20px; color:#e5e7eb; font-size:16px; margin-top:20px; }
-.db-ph b { display:block; color:#fff; font-size:20px; margin-bottom:6px; }
-
 /* modo desenvolvedor: botão flutuante no canto superior direito */
 .st-key-dev_panel { position:fixed !important; right:8px; top:8px; z-index:9999; width:auto !important; gap:0 !important; }
 .st-key-dev_panel button { background:#7c3aed !important; color:#fff !important; border:none !important; font-size:12px;
@@ -682,20 +867,17 @@ SVG_HALTER = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 28' fill=
               "<rect x='46' y='3' width='7' height='22' rx='2.5'/><rect x='55' y='8' width='5' height='12' rx='2'/></svg>")
 SVG_AVATAR = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='#2f8bff'>"
               "<circle cx='50' cy='27' r='24'/><path d='M8 98C8 72 26 63 50 63S92 72 92 98Z'/></svg>")
-AVATAR_AZUL = f'<div class="ft-avatar">{SVG_AVATAR}</div>'
-LOGO = f'<div class="ft-logo">{SVG_HALTER}<span><i>Fit</i><b>Track</b></span></div>'
-LOGO_P = f'<div class="ft-logo-p">{SVG_HALTER}<span><i>Fit</i><b>Track</b></span></div>'
 
-ICO_CAL, ICO_PESO, ICO_PESSOA = azul(SVG_CALENDARIO), azul(SVG_PESO), azul(SVG_PESSOA)
-ICO_REGUA = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#2f8bff' stroke-width='2' "
+SVG_CAL_AZ, SVG_PESO_AZ, SVG_PESSOA_AZ = azul(SVG_CALENDARIO), azul(SVG_PESO), azul(SVG_PESSOA)
+SVG_REGUA = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#2f8bff' stroke-width='2' "
              "stroke-linecap='round' stroke-linejoin='round'><path d='M3 17L17 3l4 4L7 21z'/>"
              "<path d='M7 13l2 2M10 10l2 2M13 7l2 2'/></svg>")
-ICO_CHECK = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='#2f8bff' stroke-width='3' "
+SVG_CHECK = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='#2f8bff' stroke-width='3' "
              "stroke-linecap='round' stroke-linejoin='round'><circle cx='20' cy='20' r='17'/><path d='M12 21l6 6 11-13'/></svg>")
-ICO_ALVO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#2f8bff' stroke-width='2' "
+SVG_ALVO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#2f8bff' stroke-width='2' "
             "stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><circle cx='12' cy='12' r='5'/>"
             "<circle cx='12' cy='12' r='1.2' fill='#2f8bff'/><path d='M12 12l8-8M17 3v4h4'/></svg>")
-ICO_GRAFICO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#2f8bff' stroke-width='2' "
+SVG_GRAFICO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#2f8bff' stroke-width='2' "
                "stroke-linecap='round' stroke-linejoin='round'><path d='M3 3v18h18'/><path d='M7 15l4-4 3 3 6-7'/>"
                "<path d='M16 7h4v4'/></svg>")
 
@@ -724,13 +906,33 @@ def css_objetivos(selecionado):
     """Ícones dos botões da tela 5 e o visual azul do botão escolhido (a troca de cor faz o fade)."""
     regras = []
     for chave, svg in SVG_OBJ.items():
-        url = 'url("data:image/svg+xml,' + quote(svg) + '")'
-        regras.append(f'.stApp .st-key-obj_{chave} .stButton button::before {{ background-image:{url}; }}')
+        regras.append(f'.stApp .st-key-obj_{chave} .stButton button::before {{ background-image:{ref_icone(chave, svg)}; }}')
     if selecionado in SVG_OBJ:
         regras.append(f'.stApp .st-key-obj_{selecionado} .stButton button '
                       '{ background:#14284a !important; border-color:#3b82f6 !important; }')
         regras.append(f'.stApp .st-key-obj_{selecionado} .stButton button p {{ color:#fff !important; }}')
     return "\n".join(regras)
+
+
+
+# ícones recortados das interfaces (tamanho = design x k); se o arquivo não existir, usa o desenho de reserva
+IMG_AVATAR = img_icone("avatar", SVG_AVATAR, 0.87)
+IMG_AVATAR_P = img_icone("avatar", SVG_AVATAR, 0.72)
+IMG_HALTER = img_icone("logo_halter", SVG_HALTER, 0.8)
+IMG_HALTER_P = img_icone("logo_halter", SVG_HALTER, 0.75)
+AVATAR_AZUL = f'<div class="ft-avatar">{IMG_AVATAR}</div>'
+LOGO = f'<div class="ft-logo">{IMG_HALTER}<span><i>Fit</i><b>Track</b></span></div>'
+LOGO_P = f'<div class="ft-logo-p">{IMG_HALTER_P}<span><i>Fit</i><b>Track</b></span></div>'
+ICO_HALTER_TOPO = img_icone("halter_topo", SVG_HALTER, 0.8)
+
+ICO_CAL = img_icone("cal_azul", SVG_CAL_AZ)
+ICO_PESO = img_icone("peso_azul", SVG_PESO_AZ)
+ICO_PESSOA = img_icone("pessoa_azul", SVG_PESSOA_AZ)
+ICO_REGUA = img_icone("regua_azul", SVG_REGUA)
+ICO_CHECK = img_icone("check", SVG_CHECK)
+ICO_ALVO = img_icone("alvo", SVG_ALVO)
+ICO_GRAFICO = img_icone("grafico", SVG_GRAFICO)
+ICO_HALTER_PQ = img_icone("halter_pq", SVG_HALTER)
 
 
 COLUNAS_BOTAO = [0.3, 0.4, 0.3]  # botão azul centralizado, como no design
@@ -743,6 +945,7 @@ st.session_state.setdefault("usuario", None)
 def ir(tela):
     st.session_state.tela = tela
     st.session_state.msg = None
+    st.session_state.fade_in = True  # a tela nova entra com fade
 
 
 def aviso(texto, ok=False):
@@ -765,7 +968,7 @@ def cabecalho_logo(subtitulo="Jornada Fitness"):
 
 
 def cabecalho_cadastro():
-    st.markdown(f'<div class="ft-icone-halter">{SVG_HALTER}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="ft-icone-halter">{ICO_HALTER_TOPO}</div>', unsafe_allow_html=True)
     st.markdown("<div class='ft-titulo'>Crie sua conta</div>", unsafe_allow_html=True)
     st.markdown("<div class='ft-sub'>Comece sua jornada com FitTrack</div>", unsafe_allow_html=True)
 
@@ -804,8 +1007,8 @@ def tela_login():
         senha = campo("Senha", "login_senha", senha=True)
         _, c2, c3 = st.columns(COLUNAS_BOTAO)
         entrar = c2.button("Login", type="primary", key="btn_login")
-        c3.button("Esqueceu a senha?", type="tertiary", key="btn_esq",
-                  on_click=ir, args=("esqueceu",))
+        if c3.button("Esqueceu a senha?", type="tertiary", key="btn_esq"):
+            transitar("esqueceu")  # fade: login -> recuperar senha
         if entrar:
             ok, res = login(email, senha)
             if ok:
@@ -857,9 +1060,10 @@ def enviar_codigo_por_email(email, codigo):
     })
 
 
-ICO_CADEADO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7 10V7a5 5 0 0110 0v3' fill='none' "
+SVG_CADEADO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7 10V7a5 5 0 0110 0v3' fill='none' "
                "stroke='#2f8bff' stroke-width='2.4'/><rect x='4' y='10' width='16' height='12' rx='3' fill='#2f8bff'/>"
                "<circle cx='12' cy='15.5' r='1.7' fill='#131d33'/><rect x='11.2' y='16' width='1.6' height='3.4' rx='.8' fill='#131d33'/></svg>")
+ICO_CADEADO = img_icone("lock_azul", SVG_CADEADO)
 
 
 def voltar_login():
@@ -934,25 +1138,19 @@ def tela_esqueceu():
 DIAS_SEMANA = ["SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA", "QUINTA-FEIRA", "SEXTA-FEIRA", "SÁBADO", "DOMINGO"]
 MESES = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO",
          "NOVEMBRO", "DEZEMBRO"]
+DIAS_CURTOS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+ICONE_GRUPO = {"peito": "ativ_peito", "costas": "ativ_costas", "bracos": "ativ_bracos", "ombros": "massa", "pernas": "saude"}
 
-# EXEMPLOS FIXOS (como no design) até existir o registro de treinos: troque por dados reais depois.
-EXEMPLO_TREINOS, EXEMPLO_DIAS = 12, 5
-EXEMPLO_ATIVIDADES = [("massa", "Treino de peito", "Hoje - 45 min"), ("peso", "Treino de costas", "Ontem - 50 min"),
-                      ("forca", "Treino de braços", "Sexta - 35 min")]
-
-ICO_LAPIS = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#2f8bff' stroke-width='2' "
+SVG_LAPIS = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#2f8bff' stroke-width='2' "
              "stroke-linecap='round' stroke-linejoin='round'><path d='M4 20l1-5L16 4l4 4L9 19z'/><path d='M14 6l4 4'/></svg>")
-GRAFICO_PESO = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 50'><polyline fill='none' stroke='#2f8bff' stroke-width='1.6' "
-                "points='6,40 28,34 50,38 72,24 94,34 116,20 138,14'/>"
-                + "".join(f"<circle cx='{x}' cy='{y}' r='2.2' fill='#2f8bff'/>"
-                          for x, y in ((6, 40), (28, 34), (50, 38), (72, 24), (94, 34), (116, 20), (138, 14))) + "</svg>")
+DASH_LARGURA = 714 * DASH_ESCALA
 
 MENU_ITENS = [("inicio", "Início"), ("rotina", "Minha rotina"), ("progresso", "Progresso"), ("perfil", "Perfil")]
-MENU_ICONES = {
+MENU_PNG = {"inicio": "casa", "rotina": "rotina", "progresso": "progresso", "perfil": "perfil", "sair": "sair"}
+MENU_ICONES = {  # desenhos de reserva, usados só se os PNGs não estiverem na pasta assets/icones
     "inicio": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3 11l9-8 9 8v10h-6v-6H9v6H3z' fill='#fff'/></svg>",
     "rotina": ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#fff' stroke-width='1.8' "
-               "stroke-linecap='round'><rect x='3' y='5' width='18' height='16' rx='2'/><path d='M3 10h18M8 3v4M16 3v4'/>"
-               "<path d='M8 14h2M12 14h2M16 14h.1M8 17.5h2M12 17.5h2' stroke-width='2'/></svg>"),
+               "stroke-linecap='round'><rect x='3' y='5' width='18' height='16' rx='2'/><path d='M3 10h18M8 3v4M16 3v4'/></svg>"),
     "progresso": ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='#fff'><rect x='3' y='13' width='4' height='8' rx='1'/>"
                   "<rect x='10' y='9' width='4' height='12' rx='1'/><rect x='17' y='5' width='4' height='16' rx='1'/></svg>"),
     "perfil": SVG_PESSOA.replace("#d1d5db", "#fff"),
@@ -960,16 +1158,88 @@ MENU_ICONES = {
              "stroke-linecap='round' stroke-linejoin='round'><path d='M10 4H5v16h5'/><path d='M14 8l5 4-5 4M19 12H9'/></svg>"),
 }
 
+# CSS do dashboard escrito nas medidas do design (px) e ampliado por DASH_ESCALA (sem zoom, para o menu poder ser fixo)
+CSS_DASH = """
+.block-container > [data-testid="stVerticalBlock"]:has(.st-key-dash_root) { justify-content:flex-start; }
+.block-container .st-key-dash_root { gap:0; }
+.block-container .st-key-menu_lateral { position:fixed; top:8px; bottom:8px; left:__MENU_LEFT__; width:239px; background:#15223f;
+    border-radius:16px; padding:16px 12px; gap:6px; box-sizing:border-box; z-index:5; overflow:hidden; }
+.block-container .st-key-conteudo_dash { margin-left:251px; max-width:446px; gap:0; }
+.st-key-menu_lateral .ft-logo-p { font-size:19px; line-height:24px; gap:6px; margin-left:6px; }
+.dm-hr { height:1px; background:#4a5568; margin:14px 6px 16px; }
+.dm-label { color:#3b82f6; font-size:12px; font-weight:700; margin:0 8px 6px; }
+[class*="st-key-mn_"], [class*="st-key-mn_"] .stButton { width:100% !important; }
+.stApp [class*="st-key-mn_"] .stButton button { width:100% !important; height:46px; min-height:46px; background:transparent; border:none;
+    border-radius:12px; justify-content:flex-start; padding:0 12px; box-shadow:none; }
+.stApp [class*="st-key-mn_"] .stButton button [data-testid="stMarkdownContainer"] { flex:1; width:auto; text-align:left; }
+.stApp [class*="st-key-mn_"] .stButton button p { color:#fff; font-size:19px; font-weight:500; text-align:left; line-height:1.1; }
+.stApp [class*="st-key-mn_"] .stButton button::before { content:""; width:24px; height:24px; margin-right:14px; flex:none;
+    background-repeat:no-repeat; background-position:center; background-size:contain; }
+.stApp .st-key-mn_sair .stButton button p { font-size:16px; font-weight:400; }
+.stApp .st-key-mn_sair .stButton button::before { width:22px; height:22px; margin-right:12px; }
+.st-key-menu_sair { position:absolute !important; left:12px; right:12px; bottom:14px; gap:6px; }
+.dm-hr-sair { height:1px; background:#4a5568; margin:0 6px 4px; }
+
+.db-data { color:#fff; font-size:12px; font-weight:700; margin:8px 0 6px 12px; }
+.db-ola { color:#fff; font-size:20px; font-weight:700; line-height:26px; margin:0 0 20px 12px; }
+.db-ola .ic { margin-left:4px; vertical-align:-4px; }
+.db-evoluir { margin:0 0 6px 12px; } .db-evoluir b { display:block; color:#fff; font-size:20px; line-height:26px; }
+.db-evoluir span { display:block; color:#fff; font-size:15px; line-height:19px; }
+.db-obj { background:#3b5b9a; border-radius:14px; padding:12px 14px 14px 14px; margin:8px 0 16px; }
+.db-obj-l { color:#fff; font-size:11px; font-weight:700; margin-left:12px; }
+.db-obj-c { display:flex; align-items:center; gap:12px; margin-top:4px; }
+.db-obj-t { color:#fff; font-size:19px; font-weight:700; line-height:24px; }
+.db-obj-n { color:#e5e7eb; font-size:12px; }
+.db-h { color:#fff; font-size:18px; font-weight:700; line-height:24px; margin:6px 0 8px 12px; }
+.db-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+.db-stat { background:#18294a; border-radius:12px; padding:10px 14px 12px; }
+.db-stat .ic { display:block; }
+.db-stat b { display:block; color:#fff; font-size:28px; font-weight:500; line-height:32px; }
+.db-stat span { display:block; color:#e5e7eb; font-size:12px; }
+.block-container .st-key-db_rotina { background:#18294a; border-radius:14px; padding:14px 16px 14px; gap:10px; margin-bottom:6px; }
+.db-r-t { display:flex; justify-content:space-between; align-items:center; color:#fff; font-size:17px; font-weight:700; line-height:22px; }
+.db-r-s { color:#e5e7eb; font-size:13px; margin:22px 0 14px; }
+.db-semana { display:flex; justify-content:space-between; padding:0 6px; }
+.db-dia { display:flex; flex-direction:column; align-items:center; gap:4px; color:#fff; font-size:13px; }
+.db-colchete { height:8px; border:1px solid #6b7a99; border-top:none; margin:4px 22px 6px; }
+.stApp .st-key-btn_db_montar .stButton button { height:34px; min-height:34px; border-radius:6px; }
+.stApp .st-key-btn_db_montar .stButton button p { font-size:14px !important; }
+.db-card { background:#18294a; border-radius:14px; padding:12px 16px 12px; margin-bottom:6px; }
+.db-card-topo { display:flex; justify-content:space-between; align-items:baseline; }
+.db-card-topo b { color:#fff; font-size:16px; } .db-card-topo i { color:#3b82f6; font-size:9px; font-style:normal; font-weight:700; }
+.db-peso { color:#fff; font-size:28px; font-weight:700; line-height:34px; margin-top:10px; }
+.db-peso-s { color:#e5e7eb; font-size:10px; }
+.db-grafico { display:flex; justify-content:flex-end; margin:-6px 20px 4px 0; } .db-grafico svg { width:190px; height:54px; }
+.db-ativ { padding:8px 14px; }
+.db-ati { display:flex; align-items:center; gap:10px; padding:5px 0; }
+.db-ati > div { flex:1; } .db-ati b { display:block; color:#fff; font-size:14px; line-height:17px; } .db-ati span { display:block; color:#e5e7eb; font-size:12px; }
+.db-vazio { color:#e5e7eb; font-size:13px; padding:10px 2px; }
+.db-ph { background:#18294a; border-radius:14px; padding:26px 20px; color:#e5e7eb; font-size:16px; margin-top:20px; }
+.db-ph b { display:block; color:#fff; font-size:20px; margin-bottom:6px; }
+.db-obj-c svg, .db-stat svg, .db-r-t svg, .db-dia svg, .db-ati svg { width:20px; height:20px; }
+"""
+
+
+def escalar_px(css, k):
+    """Multiplica todas as medidas em px do CSS por k (é assim que o dashboard cresce sem usar zoom)."""
+    return re.sub(r"(?<![\w.])(-?(?:\d+\.\d+|\.\d+|\d+))px", lambda m: f"{float(m.group(1)) * k:g}px", css)
+
 
 def css_dashboard(aba):
     regras = []
     for chave, svg in MENU_ICONES.items():
-        url = 'url("data:image/svg+xml,' + quote(svg) + '")'
-        regras.append(f'.stApp .st-key-mn_{chave} .stButton button::before {{ background-image:{url}; }}')
+        regras.append(f'.stApp .st-key-mn_{chave} .stButton button::before '
+                      f'{{ background-image:{ref_icone(MENU_PNG[chave], svg)}; }}')
     if aba in dict(MENU_ITENS):
         regras.append(f'.stApp .st-key-mn_{aba} .stButton button {{ background:#2e4a86 !important; }}')
         regras.append(f'.stApp .st-key-mn_{aba} .stButton button p {{ font-weight:700 !important; }}')
     return "\n".join(regras)
+
+
+def css_dashboard_completo(aba):
+    # o menu fica fixo na tela, alinhado à esquerda do bloco centralizado (8px compensam a barra de rolagem)
+    esquerda = f"max(8px, calc(50% - {DASH_LARGURA / 2 - 8 * DASH_ESCALA + 8:g}px))"
+    return escalar_px(CSS_DASH, DASH_ESCALA).replace("__MENU_LEFT__", esquerda) + "\n" + css_dashboard(aba)
 
 
 def css_niveis(selecionado):
@@ -996,40 +1266,77 @@ def sair_da_conta():
     transitar("login")
 
 
-def html_dashboard(p, objetivo, nivel):
+def rotulo_data(d):
+    dias = (date.today() - d).days
+    if dias <= 0:
+        return "Hoje"
+    if dias == 1:
+        return "Ontem"
+    return DIAS_CURTOS[d.weekday()] if dias < 7 else d.strftime("%d/%m")
+
+
+def grafico_peso_svg(historico):
+    """Linha com os pesos registrados nos últimos 30 dias (um ponto por registro)."""
+    if not historico:
+        return ""
+    largura, altura, margem = 180, 50, 6
+    inicio = date.today() - timedelta(days=29)
+    xs = [margem + max((d - inicio).days, 0) / 29 * (largura - 2 * margem) for d, _ in historico]
+    kgs = [kg for _, kg in historico]
+    menor, maior = min(kgs), max(kgs)
+    ys = [altura / 2 if maior == menor else (altura - margem) - (kg - menor) / (maior - menor) * (altura - 2 * margem)
+          for kg in kgs]
+    pontos = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+    linha = f"<polyline fill='none' stroke='#2f8bff' stroke-width='1.6' points='{pontos}'/>" if len(xs) > 1 else ""
+    bolas = "".join(f"<circle cx='{x:.1f}' cy='{y:.1f}' r='2.2' fill='#2f8bff'/>" for x, y in zip(xs, ys))
+    return f"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {largura} {altura}'>{linha}{bolas}</svg>"
+
+
+def html_dashboard(p, objetivo, nivel, treinos, dias_ativos):
+    k = DASH_ESCALA
     hoje = date.today()
     data = f"{DIAS_SEMANA[hoje.weekday()]}, {hoje.day} DE {MESES[hoje.month - 1]}"
     primeiro = (p["nome"].split() or ["atleta"])[0]
     chave_obj = {r: c for c, r in OBJETIVOS}.get(objetivo, "massa")
     nivel_txt = f"Nível {nivel.lower()}" if nivel else ""
     return (f'<div class="db-data">{data}</div>'
-            f'<div class="db-ola">Olá {html.escape(normalizar_nome(primeiro))} 👋</div>'
+            f'<div class="db-ola">Olá {html.escape(normalizar_nome(primeiro))} {img_icone("mao", "👋", k * 0.9)}</div>'
             '<div class="db-evoluir"><b>Vamos evoluir hoje?</b><span>Sua jornada continua. Mantenha o foco!</span></div>'
-            f'<div class="db-obj"><div class="db-obj-l">SEU OBJETIVO</div><div class="db-obj-c">{SVG_OBJ[chave_obj]}'
+            f'<div class="db-obj"><div class="db-obj-l">SEU OBJETIVO</div><div class="db-obj-c">'
+            f'{img_icone(chave_obj, SVG_OBJ[chave_obj], k * 0.95)}'
             f'<div><div class="db-obj-t">{html.escape(objetivo or "Defina seu objetivo")}</div>'
             f'<div class="db-obj-n">{html.escape(nivel_txt)}</div></div></div></div>'
             '<div class="db-h">Seu resumo</div>'
-            f'<div class="db-grid"><div class="db-stat">{SVG_HALTER}<b>{EXEMPLO_TREINOS}</b><span>Treinos realizados</span></div>'
-            f'<div class="db-stat">{SVG_OBJ["gordura"]}<b>{EXEMPLO_DIAS}</b><span>Dias ativos</span></div></div>')
+            f'<div class="db-grid"><div class="db-stat">{img_icone("halter_stat", SVG_HALTER, k)}<b>{treinos}</b>'
+            f'<span>Treinos realizados</span></div>'
+            f'<div class="db-stat">{img_icone("chama_stat", SVG_OBJ["gordura"], k)}<b>{dias_ativos}</b>'
+            f'<span>Dias ativos</span></div></div>')
 
 
 def html_rotina():
-    dias = "".join(f'<div class="db-dia">{ICO_LAPIS}<span>{d}</span></div>'
+    k = DASH_ESCALA
+    dias = "".join(f'<div class="db-dia">{img_icone("lapis", SVG_LAPIS, k)}<span>{d}</span></div>'
                    for d in ("dom", "seg", "ter", "qua", "qui", "sex", "sab"))
-    return (f'<div class="db-r-t"><span>Sua rotina</span>{ICO_CAL}</div>'
+    return (f'<div class="db-r-t"><span>Sua rotina</span>{img_icone("cal_rotina", SVG_CAL_AZ, k)}</div>'
             '<div class="db-r-s">Você ainda não possui uma rotina de treino</div>'
             f'<div class="db-semana">{dias}</div><div class="db-colchete"></div>')
 
 
-def html_evolucao(peso_kg):
-    atividades = "".join(f'<div class="db-ati">{SVG_OBJ[c]}<div><b>{t}</b><span>{d}</span></div>{ICO_CHECK}</div>'
-                         for c, t, d in EXEMPLO_ATIVIDADES)
+def html_evolucao(peso_kg, historico, atividades):
+    k = DASH_ESCALA
+    if atividades:
+        itens = "".join(
+            f'<div class="db-ati">{img_icone(ICONE_GRUPO.get(a["grupo"], "massa"), SVG_OBJ["massa"], k * 0.95)}'
+            f'<div><b>{html.escape(a["nome"])}</b><span>{rotulo_data(a["data"])} - {a["minutos"]} min</span></div>'
+            f'{img_icone("check_ativ", SVG_CHECK, k)}</div>' for a in atividades)
+    else:
+        itens = '<div class="db-vazio">Nenhuma atividade registrada ainda.</div>'
     return ('<div class="db-h">Sua evolução</div><div class="db-card"><div class="db-card-topo"><b>Evolução do peso</b>'
             '<i>ÚLTIMOS 30 DIAS</i></div>'
             f'<div class="db-peso">{_fmt_num(peso_kg)} kg</div>'
             '<div class="db-peso-s">Acompanhe as mudanças ao longo do tempo.</div>'
-            f'<div class="db-grafico">{GRAFICO_PESO}</div></div>'
-            f'<div class="db-h">Atividade recente</div><div class="db-card db-ativ">{atividades}</div>')
+            f'<div class="db-grafico">{grafico_peso_svg(historico)}</div></div>'
+            f'<div class="db-h">Atividade recente</div><div class="db-card db-ativ">{itens}</div>')
 
 
 def tela_dashboard():
@@ -1040,31 +1347,32 @@ def tela_dashboard():
         st.rerun()
         return
     aba = st.session_state.get("aba") or "inicio"
-    with st.container(key="zoom_dash"):
-        esq, dir_ = st.columns([0.34, 0.66], gap="small")
-        with esq:
-            with st.container(key="menu_lateral"):  # fica fixo enquanto a página rola
-                st.markdown(f'{LOGO_P}<div class="dm-hr"></div><div class="dm-label">MENU PRINCIPAL</div>',
-                            unsafe_allow_html=True)
-                for chave, rotulo in MENU_ITENS:
-                    st.button(rotulo, key=f"mn_{chave}", on_click=abrir_aba, args=(chave,))
-                with st.container(key="menu_sair"):
-                    st.markdown('<div class="dm-hr-sair"></div>', unsafe_allow_html=True)
-                    if st.button("Sair", key="mn_sair"):
-                        sair_da_conta()
-        with dir_:
+    with st.container(key="dash_root"):
+        with st.container(key="menu_lateral"):  # fixo: ocupa a altura da tela e não rola
+            st.markdown(f'{LOGO_P}<div class="dm-hr"></div><div class="dm-label">MENU PRINCIPAL</div>',
+                        unsafe_allow_html=True)
+            for chave, rotulo in MENU_ITENS:
+                st.button(rotulo, key=f"mn_{chave}", on_click=abrir_aba, args=(chave,))
+            with st.container(key="menu_sair"):
+                st.markdown('<div class="dm-hr-sair"></div>', unsafe_allow_html=True)
+                if st.button("Sair", key="mn_sair"):
+                    sair_da_conta()
+        with st.container(key="conteudo_dash"):
             if aba == "inicio":
-                st.markdown(html_dashboard(p, obter_objetivo(email), obter_nivel(email)), unsafe_allow_html=True)
+                treinos, dias_ativos = resumo_treinos(email)
+                st.markdown(html_dashboard(p, obter_objetivo(email), obter_nivel(email), treinos, dias_ativos),
+                            unsafe_allow_html=True)
                 with st.container(key="db_rotina"):
                     st.markdown(html_rotina(), unsafe_allow_html=True)
                     _, c2, _ = st.columns([0.2, 0.6, 0.2])
-                    if c2.button("+ Montar minha rotina", type="primary", key="btn_db_montar"):
+                    if c2.button("\\+ Montar minha rotina", type="primary", key="btn_db_montar"):
                         aviso("A montagem da rotina chega na próxima tela.")
                     mostrar_msg()
-                st.markdown(html_evolucao(p["peso_kg"]), unsafe_allow_html=True)
+                peso = peso_atual(email) or p["peso_kg"]
+                st.markdown(html_evolucao(peso, historico_peso(email), atividades_recentes(email)),
+                            unsafe_allow_html=True)
             else:
-                nome_aba = dict(MENU_ITENS)[aba]
-                st.markdown(f'<div class="db-ph"><b>{nome_aba}</b>Esta área estará disponível em breve.</div>',
+                st.markdown(f'<div class="db-ph"><b>{dict(MENU_ITENS)[aba]}</b>Esta área estará disponível em breve.</div>',
                             unsafe_allow_html=True)
 
 
@@ -1198,7 +1506,7 @@ RESUMO_DIREITA = (f'<div class="rs-topo">{ICO_CHECK}<span>Tudo pronto!</span></d
                   '<div class="rs-card-s">Queremos conhecer seus objetivos para personalizar sua experiência.</div>'
                   f'<div class="rs-li">{ICO_ALVO}<span>Descubra seu objetivo</span></div>'
                   f'<div class="rs-li">{ICO_GRAFICO}<span>Acompanhe sua evolução</span></div>'
-                  f'<div class="rs-li">{SVG_HALTER}<span>Organize seus treinos</span></div></div>')
+                  f'<div class="rs-li">{ICO_HALTER_PQ}<span>Organize seus treinos</span></div></div>')
 
 
 def tela_resumo():
@@ -1216,7 +1524,7 @@ def tela_resumo():
              (ICO_REGUA, "Altura", f"{p['altura_cm'] / 100:.2f}".replace(".", ",") + " m"))
     lista = "".join(f'<div class="rs-item">{ico}<div><div class="rs-lbl">{rot}</div>'
                     f'<div class="rs-val">{html.escape(val)}</div></div></div>' for ico, rot, val in itens)
-    esquerda = (f'{LOGO_P}<div class="rs-hr"></div><div class="rs-avatar">{SVG_AVATAR}</div>'
+    esquerda = (f'{LOGO_P}<div class="rs-hr"></div><div class="rs-avatar">{IMG_AVATAR_P}</div>'
                 f'<div class="rs-nome">{html.escape(normalizar_nome(p["nome"]))}</div><div class="rs-hr"></div>'
                 f'<div class="rs-titulo">SEU PERFIL</div>{lista}')
     with st.container(key="zoom_resumo"):
@@ -1303,7 +1611,7 @@ def dev_ir(chave):
         st.session_state.usuario = garantir_usuario_dev()
     st.session_state.tela = tela
     st.session_state.msg = None
-    st.session_state.fade_in = False
+    st.session_state.fade_in = True  # a tela nova entra com fade
     st.session_state.aba = "inicio"
     st.session_state.codigo_enviado = chave == "esqueceu2"
     st.session_state.rec_email_val = EMAIL_DEV if chave == "esqueceu2" else None
@@ -1328,6 +1636,8 @@ def painel_dev():
                         f"**usuário:** `{st.session_state.get('usuario') or '-'}`")
             for chave, rotulo, _ in TELAS_DEV:
                 st.button(rotulo, key=f"dev_ir_{chave}", on_click=dev_ir, args=(chave,))
+            st.button("Gerar treinos e pesos de exemplo", key="dev_dados", on_click=gerar_dados_exemplo_dev)
+            st.button("Zerar treinos e pesos de teste", key="dev_zerar", on_click=zerar_dados_dev)
             st.button("Sair / limpar sessão", key="dev_sair", on_click=dev_sair)
 
 
@@ -1338,6 +1648,17 @@ TELAS = {"login": tela_login, "cadastro": tela_cadastro, "esqueceu": tela_esquec
 tela = st.session_state.tela
 if tela in ("home", "perfil", "resumo", "objetivos", "niveis") and not st.session_state.usuario:  # protege a tela interna
     tela = st.session_state.tela = "login"
+
+def css_da_tela(tela):
+    """CSS dinâmico só da tela aberta: botão escolhido, ícones e o dashboard."""
+    if tela == "objetivos":
+        return css_objetivos(st.session_state.get("objetivo"))
+    if tela == "niveis":
+        return css_niveis(st.session_state.get("nivel"))
+    if tela == "home":
+        return css_dashboard_completo(st.session_state.get("aba") or "inicio")
+    return ""
+
 
 # larguras: "Registrar conta" ocupa quase toda a janela; as telas 4 e 5 seguem o tamanho do design
 # "Recuperar senha" é mais comprida (vários campos): usa escalas menores para não rolar a página
@@ -1354,12 +1675,15 @@ elif tela == "esqueceu":
 elif tela == "niveis":
     LARGURA_CSS = f"{round(716 * TELA_ESCALA)}px"
 elif tela == "home":
-    LARGURA_CSS = f"{round(714 * TELA_ESCALA)}px"
+    LARGURA_CSS = f"{round(DASH_LARGURA)}px"
 else:
     LARGURA_CSS = f"{round(LARGURAS[tela] * CARD_USADO)}px"
 
 # fade-in só quando a tela acabou de ser trocada por transitar()
-FADE_CSS = ".block-container { animation: ftfadein .6s ease both; }" if st.session_state.pop("fade_in", False) else ""
+# o atraso de .3s mantém a tela invisível até o conteúdo novo estar pronto (evita ver a tela anterior esticada)
+FADE_CSS = ".block-container { animation: ftfadein .6s ease .3s both; }" if st.session_state.pop("fade_in", False) else ""
+
+css_extra = css_icones(tela) + "\n" + css_da_tela(tela)  # antes do replace: registra as variáveis dos ícones
 
 st.markdown(CSS.replace("__LARGURA__", LARGURA_CSS)
             .replace("__PERFIL_ESCALA__", str(PERFIL_ESCALA))
@@ -1367,9 +1691,7 @@ st.markdown(CSS.replace("__LARGURA__", LARGURA_CSS)
             .replace("__HEADER_ESCALA__", str(HEADER_USADO))
             .replace("__TELA_ESCALA__", str(TELA_ESCALA))
             .replace("__ESCALA__", str(ESCALA))
-            .replace("__ICONES__", css_icones() + "\n" + css_objetivos(st.session_state.get("objetivo")) + "\n"
-                     + css_niveis(st.session_state.get("nivel")) + "\n"
-                     + css_dashboard(st.session_state.get("aba") or "inicio"))
+            .replace("__ICONES__", css_vars_icones() + "\n" + css_extra)
             .replace("__FADE__", FADE_CSS),
             unsafe_allow_html=True)
 painel_dev()  # só aparece no modo desenvolvedor
